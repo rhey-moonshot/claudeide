@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>ClaudeIDE</title>
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="toolbar">
+    <div class="brand" title="ClaudeIDE by Rhey Minoza">
+      <span class="logo"><svg viewBox="0 0 24 24" width="15" height="15"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" fill="currentColor"/></svg></span>
+      ClaudeIDE
+    </div>
+
+    <button id="file-menu" class="menu-btn" title="File">File</button>
+
+    <div class="group">
+      <button id="add-pane" title="Add a terminal pane (Ctrl+T)">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+        Pane
+      </button>
+      <span class="sep"></span>
+      <span class="lbl">Layout</span>
+      <button class="layout-btn" data-n="3">3</button>
+      <button class="layout-btn" data-n="4">4</button>
+      <button class="layout-btn" data-n="6">6</button>
+      <button class="layout-btn" data-n="8">8</button>
+      <button class="layout-btn" data-n="12">12</button>
+    </div>
+
+    <div class="group grow">
+      <label class="auto">
+        <input type="checkbox" id="autorun" checked />
+        auto-run
+      </label>
+      <label class="auto" title="Desktop notification when a pane needs your input">
+        <input type="checkbox" id="notify-toggle" checked />
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        notify
+      </label>
+      <input id="cmd" type="text" value="claude" title="Command run in each new pane" />
+      <span class="lbl">in</span>
+      <input id="cwd" type="text" placeholder="working dir (default: home)" />
+    </div>
+
+    <div class="window-controls">
+      <button id="win-min" class="win-btn" title="Minimize" aria-label="Minimize">
+        <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor"/></svg>
+      </button>
+      <button id="win-max" class="win-btn" title="Maximize" aria-label="Maximize">
+        <svg class="ico-max" width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg>
+        <svg class="ico-restore" width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor"/><path d="M2.5 2.5 V0.5 H9.5 V7.5 H7.5" fill="none" stroke="currentColor"/></svg>
+      </button>
+      <button id="win-close" class="win-btn win-close" title="Close" aria-label="Close">
+        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0 L10 10 M10 0 L0 10" stroke="currentColor"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <nav id="tabbar">
+    <div id="tabs"></div>
+  </nav>
+
+  <main id="grid"></main>
+
+  <section id="welcome" aria-hidden="true">
+    <div class="welcome-card">
+      <div class="welcome-logo">
+        <svg viewBox="0 0 24 24" width="56" height="56"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" fill="currentColor"/></svg>
+      </div>
+      <h1 class="welcome-title">ClaudeIDE</h1>
+      <p class="welcome-by">by Rhey Minoza</p>
+
+      <p class="welcome-lead">An editor built for <em>vibe coding</em> with Claude Code.</p>
+
+      <div class="welcome-prose">
+        <p>VS Code and the editors before it were made for a world where you type
+        every line yourself. ClaudeIDE is made for the new one — where you
+        conduct a swarm of Claude Code agents, each living in its own terminal,
+        and watch them work shoulder to shoulder.</p>
+        <p>Open many sessions at once and tell at a glance which agents are
+        <strong>working</strong>, which <strong>need you</strong>, and which are
+        <strong>done</strong> — so you stay in flow instead of digging through
+        stacked terminal tabs.</p>
+      </div>
+
+      <div class="welcome-actions">
+        <button id="welcome-new" class="welcome-btn primary">New Workspace</button>
+        <button id="welcome-open" class="welcome-btn">Open Workspace</button>
+      </div>
+
+      <p class="welcome-foot">Free &amp; open source — made with care, and shared with everyone. 🌱</p>
+    </div>
+  </section>
+
+  <footer id="statusbar">
+    <div class="status-left">
+      <button id="remote-indicator" class="remote-indicator" title="Choose where new panes run (WSL, local, or SSH)">
+        <svg class="remote-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 7l3 5-3 5"/><path d="M16 7l-3 5 3 5"/></svg>
+        <span class="remote-label">Local</span>
+      </button>
+      <button id="jump-attn" title="Jump to next pane that needs you (Ctrl+Shift+J)">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        <span class="jump-label">next</span>
+      </button>
+      <span id="git-status" class="git-status" hidden title="git repository / branch of the focused pane">
+        <svg class="git-ico" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="4.5" r="1.6"/><path d="M4 5.1v5.8"/><path d="M11.8 6.1c0 3.4-3.9 2.6-7.8 5.3"/></svg>
+        <span class="git-branch"></span>
+        <span class="git-repo"></span>
+      </span>
+    </div>
+    <div class="status-right">
+      <span id="summary" class="summary"></span>
+      <span class="credit" title="ClaudeIDE by Rhey Minoza">ClaudeIDE <span class="credit-by">by Rhey Minoza</span></span>
+    </div>
+  </footer>
+
+  <button id="zen-exit" title="Exit focus mode (F11 or double-click the title bar)">
+    <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>
+    Exit focus
+  </button>
+
+  <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="detector.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

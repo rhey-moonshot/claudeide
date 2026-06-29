@@ -1,0 +1,856 @@
+/* ============================================================
+   ClaudeIDE — VSCode Dark+ theme
+   Palette, type, spacing and borders mirror VSCode's default
+   dark theme: layered surfaces (#1e1e1e editor / #252526 sidebar
+   / #333333 title bar), near-square corners, hairline borders,
+   and the #0078d4 focus accent.
+   ============================================================ */
+:root {
+  /* surfaces — darkest (editor) to lightest (title bar) */
+  --bg: #1e1e1e;          /* editor / terminal background */
+  --panel: #252526;       /* side bar, tab bar, pane header */
+  --panel-2: #2d2d2d;     /* inactive tab, hovered rows */
+  --titlebar: #333333;    /* top toolbar (activity/title bar) */
+  --input: #3c3c3c;       /* text inputs, secondary controls */
+
+  /* lines */
+  --border: #2b2b2b;      /* hairline dividers between surfaces */
+  --border-2: #3c3c3c;    /* control borders */
+  --contrast: #454545;    /* hover/active outlines */
+
+  /* text */
+  --text: #cccccc;        /* primary foreground */
+  --muted: #858585;       /* descriptions, captions */
+  --bright: #ffffff;      /* emphasised / hover text */
+
+  /* accent + actions */
+  --accent: #0078d4;      /* focus border, active markers, links */
+  --focus: #0078d4;
+  --btn: #3a3d41;         /* secondary button */
+  --btn-hover: #45494e;
+  --btn-primary: #0e639c; /* primary button */
+  --btn-primary-hover: #1177bb;
+  --remote: #16825d;      /* VSCode remote indicator green (bottom-left) */
+  --remote-hover: #1f9d72;
+
+  /* translucent overlays + tinted surfaces (themed so light mode reads right) */
+  --hover: #ffffff14;       /* subtle hover wash over chrome */
+  --hover-strong: #ffffff1a;
+  --inset: #ffffff10;       /* faint inset chip (state label, dead bg) */
+  --attn-head: #3a3115;     /* pane header when a decision is needed */
+  --row-active: #04395e55;  /* selected row in a menu */
+
+  /* status (terminal-agent states) */
+  --busy: #3794ff;        /* running */
+  --ready: #89d185;       /* idle / done */
+  --waiting: #cca700;     /* waiting on output */
+  --attn: #e5a912;        /* needs a human decision */
+  --error: #f14c4c;       /* failed */
+  --dead: #6e7681;        /* exited */
+
+  --radius: 3px;          /* VSCode keeps corners nearly square */
+  --radius-sm: 2px;
+}
+
+/* ============================================================
+   Color themes — each block overrides the palette above. The
+   chrome is fully variable-driven, so flipping `data-theme` on
+   <html> re-skins everything; terminal palettes live in the
+   renderer (XTERM_THEMES) and are applied per pane.
+   ============================================================ */
+
+/* Light+ — VSCode default light */
+:root[data-theme="light"] {
+  --bg: #ffffff; --panel: #f3f3f3; --panel-2: #e8e8e8; --titlebar: #dcdcdc; --input: #ffffff;
+  --border: #e5e5e5; --border-2: #cecece; --contrast: #c4c4c4;
+  --text: #3b3b3b; --muted: #6c6c6c; --bright: #000000;
+  --accent: #005fb8; --focus: #005fb8;
+  --btn: #e0e0e0; --btn-hover: #d4d4d4; --btn-primary: #005fb8; --btn-primary-hover: #0258a8;
+  --remote: #16825d; --remote-hover: #1a9268;
+  --hover: #00000010; --hover-strong: #0000001a; --inset: #0000000d;
+  --attn-head: #fff4d1; --row-active: #cfe6ff;
+  --busy: #0066bf; --ready: #2e8b2e; --waiting: #b07d00; --attn: #bf8803; --error: #e51400; --dead: #9a9a9a;
+}
+
+/* Monokai */
+:root[data-theme="monokai"] {
+  --bg: #272822; --panel: #2d2e28; --panel-2: #3a3b32; --titlebar: #1f201b; --input: #3a3b32;
+  --border: #1f201b; --border-2: #44453d; --contrast: #57584e;
+  --text: #f8f8f2; --muted: #a59f85; --bright: #ffffff;
+  --accent: #66d9ef; --focus: #66d9ef;
+  --btn: #44453d; --btn-hover: #51524a; --btn-primary: #4f76c2; --btn-primary-hover: #5d83cf;
+  --hover: #ffffff14; --hover-strong: #ffffff1f; --inset: #ffffff12;
+  --attn-head: #4a3f1f; --row-active: #5c5d4e88;
+  --busy: #66d9ef; --ready: #a6e22e; --waiting: #e6db74; --attn: #fd971f; --error: #f92672; --dead: #75715e;
+}
+
+/* Dracula */
+:root[data-theme="dracula"] {
+  --bg: #282a36; --panel: #2d2f3b; --panel-2: #343746; --titlebar: #21222c; --input: #343746;
+  --border: #21222c; --border-2: #414458; --contrast: #565a72;
+  --text: #f8f8f2; --muted: #9aa0c0; --bright: #ffffff;
+  --accent: #bd93f9; --focus: #bd93f9;
+  --btn: #414458; --btn-hover: #4d5169; --btn-primary: #6f4fb0; --btn-primary-hover: #7d5cc0;
+  --hover: #ffffff14; --hover-strong: #ffffff1f; --inset: #ffffff12;
+  --attn-head: #4a4019; --row-active: #44475a;
+  --busy: #8be9fd; --ready: #50fa7b; --waiting: #f1fa8c; --attn: #ffb86c; --error: #ff5555; --dead: #6272a4;
+}
+
+/* Solarized Dark */
+:root[data-theme="solarized-dark"] {
+  --bg: #002b36; --panel: #073642; --panel-2: #0a4351; --titlebar: #00212b; --input: #073642;
+  --border: #00212b; --border-2: #0f4b5a; --contrast: #1a5a6b;
+  --text: #93a1a1; --muted: #657b83; --bright: #fdf6e3;
+  --accent: #268bd2; --focus: #268bd2;
+  --btn: #0f4b5a; --btn-hover: #145a6b; --btn-primary: #268bd2; --btn-primary-hover: #3a98d8;
+  --remote: #2aa198; --remote-hover: #33b3a9;
+  --hover: #ffffff10; --hover-strong: #ffffff1a; --inset: #ffffff0d;
+  --attn-head: #3d3a1a; --row-active: #0a4351;
+  --busy: #268bd2; --ready: #859900; --waiting: #b58900; --attn: #cb4b16; --error: #dc322f; --dead: #586e75;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", -apple-system, Ubuntu, "Droid Sans", sans-serif;
+  font-size: 14px;
+  line-height: 1.4;
+  overflow: hidden;
+}
+
+body { display: flex; flex-direction: column; }
+
+/* ---- toolbar (title bar) ---- */
+/* The window is frameless; this toolbar IS the title bar. We do NOT use
+   `-webkit-app-region: drag` — under WSLg that swallows mouse events, so
+   double-click never reaches us. Instead the renderer drives drag + double-click
+   maximize manually from this bar's empty areas (see setupTitlebarDrag). */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  padding: 0 10px;
+  background: var(--titlebar);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  user-select: none;
+}
+
+/* ---- window controls (frameless title bar) ---- */
+.window-controls {
+  display: flex;
+  align-self: stretch;
+  flex: 0 0 auto;             /* never shrink/clip → close button always visible */
+  margin-left: 4px;
+  margin-right: -10px;        /* cancel the toolbar's right padding → flush corner */
+}
+#toolbar .win-btn {
+  width: 44px;
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--muted);
+  cursor: pointer;
+}
+#toolbar .win-btn:hover { background: var(--hover); color: var(--bright); }
+#toolbar .win-close:hover { background: #e81123; color: #fff; }
+.win-btn svg { display: block; }
+.win-btn .ico-restore { display: none; }
+#win-max.is-maximized .ico-max { display: none; }
+#win-max.is-maximized .ico-restore { display: block; }
+.win-max.is-maximized .ico-restore { display: block; }
+.brand { font-weight: 600; font-size: 14px; display: flex; align-items: baseline; gap: 7px; }
+.brand .logo { color: var(--accent); font-size: 15px; line-height: 1; align-self: center; }
+.group { display: flex; align-items: center; gap: 6px; }
+.group.grow { flex: 1; min-width: 0; }
+.lbl { color: var(--muted); font-size: 14px; }
+.sep { width: 1px; height: 16px; background: var(--border-2); margin: 0 2px; }
+
+#toolbar button {
+  background: var(--btn);
+  color: var(--text);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1.3;
+  transition: background .1s, color .1s;
+}
+#toolbar button:hover { background: var(--btn-hover); color: var(--bright); }
+#toolbar button:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
+.layout-btn { min-width: 28px; text-align: center; }
+
+#toolbar input[type="text"] {
+  background: var(--input);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 14px;
+}
+#toolbar input[type="text"]:focus { outline: none; border-color: var(--focus); }
+#toolbar input[type="checkbox"] { accent-color: var(--accent); margin: 0; }
+#cmd { width: 130px; }
+#cwd { flex: 0 1 200px; min-width: 60px; }
+.auto { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 14px; cursor: pointer; }
+.summary { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+#toolbar select {
+  background: var(--input);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 14px;
+  max-width: 180px;
+}
+#toolbar select:focus { outline: none; border-color: var(--focus); }
+.icon-btn { padding: 4px 8px !important; min-width: 28px; }
+
+/* "needs you" jump control lights up when something is waiting */
+#jump-attn { transition: all .15s; }
+#jump-attn.armed {
+  background: transparent;
+  border-color: var(--attn);
+  color: var(--attn);
+  box-shadow: 0 0 0 1px var(--attn);
+  animation: pulse 1.2s infinite;
+}
+
+/* ---- modal (workspace name prompt) ---- */
+.modal-overlay {
+  position: fixed; inset: 0; background: #000000a0;
+  display: flex; align-items: flex-start; justify-content: center; z-index: 100;
+  padding-top: 14vh;
+}
+.modal {
+  background: var(--panel); border: 1px solid var(--contrast);
+  border-radius: var(--radius); padding: 18px 20px; width: 420px;
+  box-shadow: 0 8px 24px #00000066;
+}
+.modal-title { font-weight: 600; font-size: 14px; margin-bottom: 12px; }
+.modal-input {
+  width: 100%; background: var(--input); color: var(--text);
+  border: 1px solid var(--border-2); border-radius: var(--radius-sm); padding: 6px 8px; font-size: 14px;
+}
+.modal-input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.modal-message { color: var(--text); font-size: 14px; line-height: 1.5; white-space: pre-line; }
+.modal-label { display: block; font-size: 14px; color: var(--muted); margin: 14px 0 4px; text-transform: none; }
+.modal-row { display: flex; gap: 6px; }
+.modal-row .modal-input { flex: 1; }
+.modal-browse {
+  background: var(--btn); color: var(--text);
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  padding: 0 12px; cursor: pointer; font-size: 14px; white-space: nowrap;
+}
+.modal-browse:hover { background: var(--btn-hover); color: var(--bright); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.modal-actions button {
+  background: var(--btn); color: var(--text); border: 1px solid transparent;
+  border-radius: var(--radius-sm); padding: 6px 16px; cursor: pointer; font-size: 14px;
+}
+.modal-actions button:hover { background: var(--btn-hover); }
+.modal-ok { background: var(--btn-primary) !important; color: #ffffff !important; border-color: transparent !important; font-weight: 400; }
+.modal-ok:hover { background: var(--btn-primary-hover) !important; }
+.modal-ok.danger { background: var(--error) !important; color: #2a0d0a !important; }
+
+/* ---- in-app folder picker (themed; replaces native GTK dialog) ---- */
+.dir-picker { width: 520px; }
+.dir-path {
+  background: var(--input); border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm); padding: 6px 8px; margin-bottom: 8px;
+  font-size: 14px; color: var(--muted); overflow: hidden;
+}
+.dir-path-text { white-space: nowrap; direction: rtl; text-align: left; display: block; overflow: hidden; text-overflow: ellipsis; }
+.dir-list {
+  height: 300px; overflow-y: auto;
+  background: var(--input); border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm); padding: 4px;
+}
+.dir-entry {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 14px; color: var(--text); user-select: none;
+}
+.dir-entry:hover { background: var(--btn-hover); color: var(--bright); }
+.dir-icon { width: 15px; height: 15px; flex: none; color: var(--accent); }
+.dir-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dir-entry:hover .dir-icon { color: inherit; }
+.dir-up .dir-icon { color: var(--muted); }
+.dir-empty { padding: 12px 8px; font-size: 14px; color: var(--muted); }
+
+/* ---- transient toast ---- */
+#flash {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%) translateY(20px);
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--contrast);
+  border-radius: var(--radius); padding: 8px 16px; font-size: 14px; opacity: 0;
+  pointer-events: none; transition: opacity .2s, transform .2s; z-index: 90;
+  box-shadow: 0 4px 14px #00000055;
+}
+#flash.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---- workspace tab bar ---- */
+#tabbar {
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  overflow-x: auto;
+  user-select: none;
+}
+#tabs { display: flex; align-items: stretch; }
+
+/* VSCode tabs: full-height, square, separated by hairlines; the active tab
+   carries the editor background and a colored top border. */
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  border-top: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  max-width: 240px;
+  color: var(--muted);
+}
+.tab:hover { background: var(--panel-2); }
+.tab.active {
+  background: var(--bg);
+  border-top-color: var(--accent);
+  color: var(--text);
+}
+.tab.attn:not(.active) .tab-name { color: var(--attn); }
+
+.tab-num {
+  font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums;
+  min-width: 9px; text-align: center; flex: 0 0 auto; opacity: 0.7;
+}
+.tab.active .tab-num { color: var(--text); opacity: 1; }
+.tab-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dead); flex: 0 0 auto; }
+.tab-dot.busy     { background: var(--busy); animation: pulse 1s infinite; }
+.tab-dot.ready    { background: var(--ready); }
+.tab-dot.approval { background: var(--attn); animation: pulse 0.8s infinite; box-shadow: 0 0 5px var(--attn); }
+.tab-dot.error    { background: var(--error); }
+
+.tab-name {
+  font-weight: 400; font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; max-width: 130px;
+  outline: none; border-radius: var(--radius-sm); padding: 0 2px;
+}
+.tab.active .tab-name { font-weight: 600; }
+.tab-name:focus { background: var(--input); box-shadow: 0 0 0 1px var(--accent); }
+.tab-meta { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tab.active .tab-meta { color: var(--muted); }
+.tab-close {
+  background: transparent; border: none; color: var(--muted);
+  cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 4px; border-radius: var(--radius-sm); opacity: 0;
+}
+.tab:hover .tab-close, .tab.active .tab-close { opacity: 1; }
+.tab-close:hover { color: var(--bright); background: var(--hover-strong); }
+
+.tab-add {
+  background: transparent; color: var(--muted);
+  border: none; border-right: 1px solid var(--border);
+  padding: 0 12px; cursor: pointer; font-size: 14px; align-self: stretch;
+}
+.tab-add:hover { color: var(--bright); background: var(--panel-2); }
+
+/* ---- grid (editor area) ---- */
+#grid {
+  flex: 1;
+  display: grid;
+  gap: 1px;                 /* VSCode separates editor groups by a hairline */
+  padding: 0;
+  background: var(--border);/* gap color shows through */
+  min-height: 0;
+}
+
+/* ---- welcome screen (shown when no tab is open) ---- */
+#welcome { display: none; }
+body.no-tabs #grid,
+body.no-tabs #tabbar { display: none; }
+body.no-tabs #welcome {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  overflow: auto;
+  padding: 32px;
+  background:
+    radial-gradient(1100px 520px at 50% -8%, var(--hover) 0%, transparent 60%),
+    var(--bg);
+}
+.welcome-card {
+  max-width: 560px;
+  text-align: center;
+  user-select: none;
+}
+.welcome-logo { color: var(--accent); line-height: 0; margin-bottom: 14px; }
+.welcome-logo svg { filter: drop-shadow(0 4px 14px color-mix(in srgb, var(--accent) 40%, transparent)); }
+.welcome-title {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--bright);
+}
+.welcome-by { margin: 4px 0 0; font-size: 14px; color: var(--muted); }
+.welcome-lead {
+  margin: 22px 0 0;
+  font-size: 16px;
+  color: var(--text);
+}
+.welcome-lead em { color: var(--accent); font-style: italic; }
+.welcome-prose {
+  margin: 18px auto 0;
+  max-width: 480px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+.welcome-prose p { margin: 0 0 10px; }
+.welcome-prose strong { color: var(--text); font-weight: 600; }
+.welcome-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 26px;
+}
+.welcome-btn {
+  background: var(--btn);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  padding: 9px 20px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background .1s, color .1s, border-color .1s;
+}
+.welcome-btn:hover { background: var(--btn-hover); color: var(--bright); }
+.welcome-btn.primary {
+  background: var(--btn-primary);
+  border-color: transparent;
+  color: #ffffff;
+  font-weight: 600;
+}
+.welcome-btn.primary:hover { background: var(--btn-primary-hover); color: #ffffff; }
+.welcome-foot { margin: 28px 0 0; font-size: 14px; color: var(--muted); }
+
+/* ---- pane (editor group) ---- */
+.pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid transparent;
+  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+}
+.pane.hidden { display: none; } /* background workspace — alive but not shown */
+.pane.dragging { opacity: 0.45; outline: 2px dashed var(--accent); outline-offset: -2px; }
+/* Files dragged from the OS are hovering over this pane's terminal. */
+.pane.drop-target { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.pane.drop-target .pane-body { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+  cursor: grab;             /* the header is the drag handle */
+}
+.pane-head:active { cursor: grabbing; }
+/* Active pane: tint the header instead of drawing a focus border. */
+.pane.focused .pane-head {
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+}
+.grip {
+  color: var(--muted); font-size: 14px; line-height: 1; letter-spacing: -1px;
+  flex: 0 0 auto; opacity: 0.6;
+}
+.pane-head:hover .grip { opacity: 1; }
+/* interactive bits inside the header keep their own cursors */
+.pane-title { cursor: text; }
+.pane-btn { cursor: pointer; }
+.dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--dead); flex: 0 0 auto;
+}
+.dot.busy    { background: var(--busy); animation: pulse 1s infinite; }
+.dot.ready   { background: var(--ready); }
+.dot.waiting { background: var(--waiting); animation: pulse 1.4s infinite; }
+.dot.approval{ background: var(--attn); animation: pulse 0.8s infinite; box-shadow: 0 0 5px var(--attn); }
+.dot.error   { background: var(--error); }
+.dot.dead    { background: var(--dead); }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.pane-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  outline: none;
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+  max-width: 55%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pane-title:focus { background: var(--input); box-shadow: 0 0 0 1px var(--accent); max-width: 70%; }
+/* a live (program-set) title reads as content, not a fixed label — lighter weight */
+.pane.auto-title .pane-title { font-weight: 500; color: var(--bright); }
+
+.pane-status {
+  flex: 1;
+  color: var(--muted);
+  font-size: 14px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.pane-state-label {
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--inset);
+  color: var(--muted);
+}
+.state-busy    { color: var(--busy);    background: #3794ff26; }
+.state-ready   { color: var(--ready);   background: #89d18526; }
+.state-waiting { color: var(--waiting); background: #cca70026; }
+.state-approval{ color: var(--attn);    background: #e5a91226; }
+.state-error   { color: var(--error);   background: #f14c4c26; }
+.state-dead    { color: var(--dead);    background: var(--inset); }
+
+/* panes that need a human decision draw the eye */
+.pane.needs-attention { border-color: var(--attn); }
+.pane.needs-attention .pane-head { background: var(--attn-head); }
+.pane.has-error { border-color: var(--error); }
+
+.summary.alert { color: var(--attn); font-weight: 600; }
+
+/* ---- status bar (bottom footer) ---- */
+#statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 26px;
+  padding: 0 4px;
+  background: var(--titlebar);
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+  user-select: none;
+}
+body.zen #statusbar { display: none; }   /* chrome melts away in focus mode */
+.status-left, .status-right { display: flex; align-items: center; min-width: 0; }
+.status-left { align-self: stretch; }   /* full footer height so items can bleed to the edges */
+.status-right { overflow: hidden; gap: 12px; }
+
+/* authorship credit, flush to the bottom-right corner */
+.status-right .credit {
+  color: var(--text); font-size: 14px; white-space: nowrap;
+  padding-right: 4px; flex: 0 0 auto;
+}
+.status-right .credit .credit-by { color: var(--muted); }
+
+/* VSCode-style remote indicator: a green pill flush to the bottom-left corner */
+#statusbar #remote-indicator {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 100%; margin: 0 8px 0 -4px; padding: 0 10px;
+  background: var(--remote); color: #ffffff; border: none; border-radius: 0;
+  font-size: 14px; cursor: pointer; white-space: nowrap;
+  transition: background .1s;
+}
+#statusbar #remote-indicator:hover { background: var(--remote-hover); }
+#remote-indicator .remote-ico { width: 13px; height: 13px; flex: none; }
+#remote-indicator .remote-label { font-weight: 400; }
+
+/* popup menu raised from the indicator (mirrors the workspace dropdown) */
+.remote-menu {
+  position: fixed; z-index: 100; min-width: 280px;
+  background: var(--panel); border: 1px solid var(--contrast);
+  border-radius: var(--radius); box-shadow: 0 8px 24px #00000066;
+  padding: 4px; overflow: hidden;
+}
+.remote-menu-head {
+  font-size: 14px; color: var(--muted); padding: 6px 10px 4px; text-transform: none;
+}
+.remote-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  font-size: 14px; color: var(--text); user-select: none;
+}
+.remote-item:hover { background: var(--btn-hover); color: var(--bright); }
+.remote-item .remote-item-ico { width: 15px; height: 15px; flex: none; color: var(--remote); }
+.remote-item:hover .remote-item-ico { color: inherit; }
+.remote-item-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.remote-item-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.remote-item-sub { font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.remote-item-tag { font-size: 14px; color: var(--muted); flex: none; }
+.remote-item.active .remote-item-tag { color: var(--ready); }
+.remote-menu-sep { height: 1px; background: var(--contrast); margin: 4px 0; }
+
+/* connection picker embedded in the Add/Edit Workspace modal */
+.conn-options { display: flex; flex-direction: column; gap: 2px; }
+.conn-options .remote-item { border: 1px solid transparent; }
+.conn-options .remote-item.active { background: var(--input); border-color: var(--contrast); }
+.conn-options .remote-item.active .remote-item-tag { color: var(--ready); font-weight: 700; }
+
+/* the "next" jump control, restyled as a flat status item */
+#statusbar #jump-attn {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 100%; padding: 0 8px;
+  background: transparent; border: none; border-radius: 0;
+  color: var(--muted); font-size: 14px; cursor: pointer;
+  transition: background .1s, color .1s;
+}
+#statusbar #jump-attn:hover { background: var(--hover); color: var(--bright); }
+#statusbar #jump-attn .ico { width: 13px; height: 13px; }
+#statusbar #jump-attn.armed {     /* something needs you */
+  background: var(--attn); color: #1e1e1e; font-weight: 600;
+  box-shadow: none; border: none; animation: none;
+}
+#statusbar #jump-attn.armed:hover { background: #f0b429; color: #1e1e1e; }
+
+/* git repo + branch of the focused pane, as a flat status item (VSCode-style) */
+#statusbar #git-status {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 100%; padding: 0 8px; min-width: 0; max-width: 320px;
+  color: var(--muted); font-size: 14px; user-select: none; white-space: nowrap;
+}
+#statusbar #git-status[hidden] { display: none; }
+#git-status .git-ico { width: 13px; height: 13px; flex: 0 0 auto; opacity: 0.9; }
+#git-status .git-branch {
+  color: var(--text); font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0;
+}
+#git-status .git-branch.detached { font-style: italic; color: var(--waiting); }
+#git-status .git-repo {
+  overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0;
+}
+#git-status .git-repo::before { content: "·"; margin-right: 5px; }
+
+/* pane-count breakdown, one colored segment per agent state */
+.summary { display: flex; align-items: center; gap: 12px; overflow: hidden; }
+.st-item { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--muted); }
+.st-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--dead);
+}
+.st-dot.busy { background: var(--busy); }
+.st-dot.ready { background: var(--ready); }
+.st-dot.approval { background: var(--attn); }
+.st-dot.error { background: var(--error); }
+.st-dot.dead { background: var(--dead); }
+
+.pane-btn {
+  background: transparent; border: none; color: var(--muted);
+  cursor: pointer; font-size: 14px; line-height: 1; padding: 3px 6px; border-radius: var(--radius-sm);
+}
+.pane-btn:hover { color: var(--bright); background: var(--hover); }
+
+.pane-body { flex: 1; min-height: 0; position: relative; }
+.pane-body .xterm { height: 100%; padding: 4px 6px; }
+
+/* ---- scrollbars (VSCode overlay style) ----
+   Gutter is reclaimed; a translucent thumb hints on hover, never reserving
+   layout space. Wheel/trackpad scrolling always works. */
+
+/* Firefox / standards */
+* {
+  scrollbar-width: none;
+  scrollbar-color: #79797966 transparent;
+}
+*:hover { scrollbar-width: thin; }
+
+/* WebKit / Chromium (Electron) */
+::-webkit-scrollbar { width: 14px; height: 14px; background: transparent; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+:hover::-webkit-scrollbar-thumb { background: #79797966; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: #646464b3; background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* xterm's viewport reserves room for a native scrollbar — remove it entirely so
+   the terminal content reclaims the full width (FitAddon picks it up on resize),
+   just like VSCode's editor. Width stays constant to avoid reflow on hover. */
+.xterm .xterm-viewport {
+  overflow-y: scroll;
+  scrollbar-width: none;        /* Firefox */
+}
+.xterm .xterm-viewport::-webkit-scrollbar { width: 0; height: 0; }
+
+/* ---- focus (zen) mode ---- */
+/* Chrome collapses away smoothly, leaving just the focused terminal. */
+#toolbar { max-height: 64px; overflow: hidden; }
+#tabbar  { max-height: 52px; overflow-x: auto; overflow-y: hidden; }
+#toolbar, #tabbar {
+  transition: max-height .22s ease, opacity .2s ease, padding .22s ease;
+}
+body.zen #toolbar,
+body.zen #tabbar {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  pointer-events: none;
+  border-bottom-color: transparent;
+}
+body.zen #grid {
+  grid-template-columns: 1fr !important;
+  grid-template-rows: 1fr !important;
+  gap: 0;
+}
+body.zen .pane:not(.zen-target) { display: none; }
+body.zen .pane.zen-target {
+  border-radius: 0;
+  border-color: transparent;
+  animation: zenIn .24s ease;
+}
+/* Melt away the pane chrome too, so its ✕ close button doesn't peek out
+   behind the floating exit affordance (which lives in the same corner). */
+body.zen .pane.zen-target .pane-head { display: none; }
+@keyframes zenIn {
+  from { opacity: 0.55; transform: scale(0.99); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* floating exit affordance */
+#zen-exit {
+  position: fixed; top: 8px; right: 12px; z-index: 80;
+  display: none;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 12px; font-size: 14px; cursor: pointer;
+  opacity: 0; transition: opacity .2s ease;
+}
+body.zen #zen-exit { display: inline-flex; align-items: center; gap: 6px; opacity: 0.5; }
+#zen-exit:hover { opacity: 1; border-color: var(--accent); color: #fff; }
+
+/* ---- inline SVG icons (font-independent, render on every system) ---- */
+.ico { width: 14px; height: 14px; flex: 0 0 auto; }
+.brand .logo { display: inline-flex; align-items: center; color: var(--accent); }
+/* buttons/labels that pair an icon with a text label */
+#add-pane, #ws-new, #jump-attn {
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.auto { gap: 6px; }
+
+/* ---- "Open workspace" dropdown ---- */
+.ico-sm { width: 11px; height: 11px; flex: 0 0 auto; opacity: 0.8; }
+#ws-open { display: inline-flex; align-items: center; gap: 5px; }
+
+.ws-menu {
+  position: fixed; z-index: 95;
+  min-width: 300px; max-width: 440px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--contrast); border-radius: var(--radius);
+  box-shadow: 0 8px 24px #00000077;
+  padding: 6px;
+  display: flex; flex-direction: column;
+}
+.ws-menu-head {
+  font-size: 14px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--muted); padding: 4px 8px 6px;
+}
+.ws-menu-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; }
+.ws-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer;
+}
+.ws-row:hover { background: var(--panel-2); }
+.ws-row.active { background: var(--row-active); }
+.ws-row-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
+.ws-row-dot.open { background: var(--ready); }
+.ws-row-dot.closed { background: var(--dead); }
+.ws-row-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ws-row-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-row-path { font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+.ws-row-tag { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; flex: 0 0 auto; }
+.ws-row-x {
+  background: transparent; border: none; color: var(--muted);
+  cursor: pointer; font-size: 14px; padding: 2px 5px; border-radius: var(--radius-sm);
+  flex: 0 0 auto; opacity: 0;
+}
+.ws-row:hover .ws-row-x { opacity: 1; }
+.ws-row-x:hover { color: var(--bright); background: var(--hover-strong); }
+.ws-menu-new {
+  margin-top: 6px; border-top: 1px solid var(--border); padding-top: 8px;
+  background: transparent; border: none; border-top: 1px solid var(--border);
+  color: var(--accent); cursor: pointer; font-size: 14px; text-align: left; padding: 8px;
+}
+.ws-menu-new:hover { background: var(--panel-2); border-radius: var(--radius-sm); }
+.ws-empty { color: var(--muted); font-size: 14px; padding: 8px; }
+
+/* ---- title-bar File menu ---- */
+.menu-btn {
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  padding: 4px 10px !important;
+  color: var(--text);
+  font-size: 14px;
+}
+.menu-btn:hover, .menu-btn.open { background: var(--btn-hover) !important; color: var(--bright); }
+
+.app-menu {
+  position: fixed; z-index: 96;
+  min-width: 200px;
+  background: var(--panel);
+  border: 1px solid var(--contrast);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px #00000077;
+  padding: 4px;
+}
+.app-menu .menu-item {
+  display: block; width: 100%; text-align: left;
+  background: transparent; border: none; color: var(--text);
+  padding: 6px 12px; font-size: 14px; cursor: pointer; border-radius: var(--radius-sm);
+}
+.app-menu .menu-item:hover { background: var(--btn-hover); color: var(--bright); }
+.app-menu .menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+/* menu rows with a keyboard-shortcut hint (e.g. Zoom) */
+.app-menu .menu-item:has(.mi-hint) { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.app-menu .mi-hint { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.app-menu .menu-item:hover .mi-hint { color: inherit; }
+
+/* ---- color-theme picker ---- */
+.theme-menu { min-width: 240px; }
+.theme-menu .menu-item { display: flex; align-items: center; gap: 10px; }
+.theme-swatch {
+  width: 30px; height: 18px; border-radius: var(--radius-sm);
+  border: 1px solid var(--contrast); flex: 0 0 auto; position: relative; overflow: hidden;
+}
+.theme-swatch::after {     /* accent dot, set inline per theme */
+  content: ""; position: absolute; right: 3px; bottom: 3px;
+  width: 7px; height: 7px; border-radius: 50%; background: var(--sw-accent);
+}
+.theme-menu .theme-name { flex: 1; }
+.theme-menu .theme-check { color: var(--accent); font-size: 14px; opacity: 0; flex: 0 0 auto; }
+.theme-menu .menu-item.active .theme-check { opacity: 1; }
+.theme-menu .menu-item.active .theme-name { font-weight: 600; }

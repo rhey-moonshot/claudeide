@@ -1,0 +1,51 @@
+name: Build Windows Installer
+
+# Builds the native Windows installer on a Windows runner (node-pty compiles
+# there — it can't be cross-built from Linux). Runs on every push to the main
+# branch, on version tags, and on manual dispatch.
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # `npm install` (not `ci`) so a slightly stale lockfile still resolves;
+      # postinstall runs electron-rebuild, compiling node-pty for Electron.
+      - name: Install dependencies
+        run: npm install
+
+      # No GH_TOKEN here on purpose, so electron-builder packages but does NOT
+      # auto-publish. Releases are handled by the explicit step below.
+      - name: Build installer
+        run: npm run dist
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClaudeIDE-Windows-Setup
+          path: dist/*.exe
+          if-no-files-found: error
+
+      # When you push a tag like v0.1.0, also attach the .exe to a GitHub Release.
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe

@@ -1,0 +1,53 @@
+{
+  "name": "claudeide",
+  "productName": "ClaudeIDE",
+  "version": "0.1.0",
+  "description": "A terminal-grid editor for running many Claude Code CLI sessions at once.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/detector.test.js",
+    "rebuild": "electron-rebuild -f -w node-pty",
+    "postinstall": "electron-rebuild -f -w node-pty",
+    "dist": "electron-builder --win",
+    "pack": "electron-builder --win --dir"
+  },
+  "author": "Rhey Minoza",
+  "license": "MIT",
+  "build": {
+    "appId": "com.rheyminoza.claudeide",
+    "productName": "ClaudeIDE",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "asarUnpack": [
+      "**/node_modules/node-pty/**"
+    ],
+    "win": {
+      "icon": "assets/icon.png",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ClaudeIDE"
+    }
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "node-pty": "^1.0.0"
+  }
+}
