@@ -20,7 +20,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # Pin to windows-2022 (not windows-latest): it ships Visual Studio 2022 with
+    # the C++ workload that node-gyp detects, so node-pty compiles. Newer images
+    # have broken node-gyp's VS detection ("Visual Studio is not installed").
+    runs-on: windows-2022
 
     steps:
       - name: Checkout
@@ -33,8 +36,11 @@ jobs:
 
       # `npm install` (not `ci`) so a slightly stale lockfile still resolves;
       # postinstall runs electron-rebuild, compiling node-pty for Electron.
+      # GYP_MSVS_VERSION points node-gyp straight at the runner's VS 2022.
       - name: Install dependencies
         run: npm install
+        env:
+          GYP_MSVS_VERSION: '2022'
 
       # No GH_TOKEN here on purpose, so electron-builder packages but does NOT
       # auto-publish. Releases are handled by the explicit step below.
