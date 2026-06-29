@@ -13,6 +13,11 @@ concurrency:
   group: build-windows-${{ github.ref }}
   cancel-in-progress: true
 
+# Needed so the tagged-release step can create a Release + upload the .exe
+# (new repos default the Actions token to read-only).
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
