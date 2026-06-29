@@ -42,10 +42,11 @@ jobs:
         env:
           GYP_MSVS_VERSION: '2022'
 
-      # No GH_TOKEN here on purpose, so electron-builder packages but does NOT
-      # auto-publish. Releases are handled by the explicit step below.
+      # `--publish never`: electron-builder only packages, never publishes (on a
+      # tag build it would otherwise try to publish and demand GH_TOKEN). The
+      # release upload is handled by the explicit step below.
       - name: Build installer
-        run: npm run dist
+        run: npm run dist -- --publish never
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
