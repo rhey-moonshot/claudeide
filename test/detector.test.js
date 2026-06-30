@@ -58,16 +58,38 @@ check('lingering approval but now idle -> input', [
   '  ? for shortcuts',
 ], 'input');
 
-check('idle (auto mode footer, no box)', [
+check('needs you: finished, last paragraph is a question', [
   '● Want me to dig into any specific leg?',
   '',
   '❋ Sautéed for 2m 28s',
   '',
   '❯',
   '▶▶ auto mode on (shift+tab to cycle) · ← for agents',
-], 'input', 'dig into');
+], 'approval', 'dig into');
 
-check('idle (accept-edits footer)', [
+check('needs you: question after a done-timer + empty prompt', [
+  'billing guard (skip if a non-deleted bill with that',
+  'readingId exists) would cover both cases cleanly. Want',
+  'me to look at that next?',
+  '❋ Brewed for 22m 58s',
+  '',
+  '❯',
+  '▶▶ auto mode on (shift+tab to cycle) · ← for agents',
+], 'approval', 'look at that next');
+
+check('needs you: question (other done-verb timer)', [
+  "oolify will redeploy both automatically. Per my notes,",
+  'the API blips with a Traefik 503 for a few minutes',
+  "during the swap, that's the normal deploy cutover. Want",
+  'e to verify the live /capabilities response once the',
+  'eploy settles?',
+  '❋ Crunched for 2m 33s',
+  '',
+  '❯',
+  '▶▶ auto mode on (shift+tab to cycle) · ← for agents',
+], 'approval', 'settles');
+
+check('idle (statement, not a question -> stays ready)', [
   '● All set.',
   '╭─────╮',
   '│ >   │',

@@ -84,6 +84,27 @@
     return m ? clean(m[1]).slice(0, 120) : null;
   }
 
+  // When Claude finishes and its LAST paragraph ends in a question, it's waiting
+  // on your answer → "needs you". Find the last real prose line (skipping the
+  // input box, the footer, blank lines, and the "Brewed for 22m 58s" done-timer)
+  // and return its text iff it ends with a question mark.
+  function lastProseQuestion(lines) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const raw = lines[i];
+      const c = clean(raw);
+      if (!c) continue;                                       // blank / box-only
+      if (RE.shortcuts.test(raw) || RE.interrupt.test(raw)) continue;  // footer
+      if (/^[>❯]/.test(c)) continue;                          // input prompt (incl. typed draft)
+      // done-timer line, e.g. "❋ Brewed for 22m 58s" / "❋ Sautéed for 2m 28s".
+      // \p{L} so accented gerunds (Sautéed) count; anchored to a trailing time so
+      // it can't swallow a real sentence that merely contains the word "for".
+      if (/^\W*\p{L}[\p{L}'-]*\s+for\s+\d[\d\s.hm]*s\s*$/u.test(c)) continue;
+      // first real assistant line from the bottom — only THIS one decides.
+      return /[A-Za-z][^?]*\?\s*$/.test(c) ? c.replace(/^[^\p{L}]+/u, '') : null;
+    }
+    return null;
+  }
+
   function detect(lines) {
     if (!lines || !lines.length) return { state: 'ready', label: 'ready', detail: '', meta: {} };
 
@@ -119,6 +140,12 @@
       const detail = q || (meta.tool ? 'approve ' + meta.tool : 'awaiting your approval');
       return { state: 'approval', label: 'needs you', detail: detail.slice(0, 120), meta };
     }
+
+    // Finished (not working, not a permission prompt) but the last paragraph asks
+    // you something → it's your turn to answer. Treat as "needs you". Checked even
+    // when there's no idle footer, so a clipped/odd footer still surfaces it.
+    const question = lastProseQuestion(lines);
+    if (question) return { state: 'approval', label: 'needs you', detail: question.slice(0, 120), meta };
 
     if (winner >= 0 && winner === iIdle) {
       return { state: 'input', label: 'ready', detail: lastBullet(lines) || 'awaiting instruction', meta };
