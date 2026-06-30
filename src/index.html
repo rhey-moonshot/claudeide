@@ -65,11 +65,10 @@
     </div>
   </header>
 
-  <nav id="tabbar">
-    <div id="tabs"></div>
-  </nav>
-
-  <main id="grid"></main>
+  <!-- One or more editor groups live here, side by side (VSCode split editor).
+       Each .group carries its own tab strip and its own pane grid; renderGroups()
+       builds and reconciles them. -->
+  <main id="editor"></main>
 
   <section id="welcome" aria-hidden="true">
     <div class="welcome-card">

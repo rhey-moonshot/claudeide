@@ -11,7 +11,7 @@
 // re-confirms it from the saved store, which is authoritative).
 try { document.documentElement.dataset.theme = (window.hydra && window.hydra.initialTheme) || 'dark'; } catch (_) {}
 
-const grid = document.getElementById('grid');
+const editor = document.getElementById('editor');
 const summaryEl = document.getElementById('summary');
 
 let env = { home: '', shell: '', platform: 'linux' };
@@ -22,6 +22,7 @@ let zenId = null;       // id of the pane in focus (zen) mode, or null
 let focusedId = null;   // id of the currently focused pane (drives the git footer)
 let zenFitTimer = null; // refit after the zen transition settles
 let tabSeq = 0;         // monotonic counter for unique tab instance ids
+let gSeq = 0;           // monotonic counter for unique editor-group ids
 
 // How many bottom rows of the live screen the detector inspects.
 const SCREEN_ROWS = 30;
@@ -130,24 +131,174 @@ function panesOf(ws) {
   return [...panes.values()].filter((p) => p.workspace === ws);
 }
 
+// ---- editor groups ---------------------------------------------------------
+// The editor area (#editor) holds one or more groups side by side, VSCode-style.
+// Each group owns an ordered list of open tabs and a single active tab. The flat
+// store.active / store.open fields are kept as a mirror of the group structure
+// (store.active = the focused group's active tab) so the rest of the app — which
+// keys off a single "current tab" — keeps working unchanged.
+function groupById(id) { return (store.groups || []).find((g) => g.id === id) || null; }
+function activeGroupObj() {
+  return groupById(store.activeGroup) || (store.groups || [])[0] || null;
+}
+function groupOf(tabId) {
+  return (store.groups || []).find((g) => g.open.includes(tabId)) || null;
+}
+// The set of tabs visible right now — one (the active tab) per group.
+function visibleTabIds() {
+  return new Set((store.groups || []).map((g) => g.active).filter(Boolean));
+}
+function groupGridEl(groupId) {
+  const sec = editor.querySelector(`.group[data-group="${groupId}"]`);
+  return sec ? sec.querySelector('.group-grid') : null;
+}
+// Mirror the flat fields onto the group structure (after any structural change).
+function syncOpenActive() {
+  store.open = (store.groups || []).flatMap((g) => g.open);
+  const ag = activeGroupObj();
+  store.active = ag ? ag.active : null;
+  store.activeGroup = ag ? ag.id : null;
+}
+// Enforce the invariants: every open tab in exactly one group, each group's
+// `active` is one of its tabs, empty groups dropped, a valid focused group.
+function ensureGroups() {
+  if (!store.groups || !store.groups.length) {
+    store.groups = (store.open && store.open.length)
+      ? [{ id: 'g' + (++gSeq), open: [...store.open], active: store.active, flex: 1 }]
+      : [];
+  }
+  for (const g of store.groups) {
+    g.open = g.open.filter((id) => store.tabs[id]);
+    if (!g.open.includes(g.active)) g.active = g.open[0] || null;
+    if (!g.flex) g.flex = 1;
+  }
+  store.groups = store.groups.filter((g) => g.open.length);
+  syncOpenActive();
+}
+
+// Park a pane's element inside the grid of the group its tab belongs to.
+function placePane(p) {
+  const g = groupOf(p.workspace);
+  const gridEl = g ? groupGridEl(g.id) : null;
+  if (gridEl && p.el.parentElement !== gridEl) gridEl.appendChild(p.el);
+}
+
+function makeGroupSection(g) {
+  const sec = document.createElement('section');
+  sec.className = 'group';
+  sec.dataset.group = g.id;
+  sec.innerHTML = '<nav class="group-tabbar"><div class="group-tabs"></div></nav>'
+    + '<div class="group-grid"></div>';
+  // Focus the group when you click anywhere inside it.
+  sec.addEventListener('mousedown', () => focusGroup(g.id));
+  return sec;
+}
+
+// Reconcile #editor's DOM (group sections + sashes) to match store.groups,
+// preserving each live .group-grid (and the pane elements inside it). Sections
+// are only re-attached when the group set/order actually changes — re-parenting
+// a section that holds the focused terminal would blur it.
+function ensureGroupsDom() {
+  const want = store.groups || [];
+  const existing = new Map();
+  for (const sec of editor.querySelectorAll('.group')) existing.set(sec.dataset.group, sec);
+  for (const [id, sec] of existing) {
+    if (!want.find((g) => g.id === id)) { sec.remove(); existing.delete(id); }
+  }
+  const wantIds = want.map((g) => g.id);
+  const curIds = [...editor.querySelectorAll('.group')].map((s) => s.dataset.group);
+  const sashCount = editor.querySelectorAll('.group-sash').length;
+  const inOrder = curIds.length === wantIds.length
+    && curIds.every((id, i) => id === wantIds[i])
+    && sashCount === Math.max(0, wantIds.length - 1)
+    && wantIds.every((id) => existing.has(id));
+
+  if (!inOrder) {
+    for (const s of editor.querySelectorAll('.group-sash')) s.remove();
+    let prev = null;
+    for (const g of want) {
+      let sec = existing.get(g.id);
+      if (!sec) { sec = makeGroupSection(g); existing.set(g.id, sec); }
+      if (prev) {
+        const sash = document.createElement('div');
+        sash.className = 'group-sash';
+        wireSash(sash, prev, g.id);
+        editor.appendChild(sash);
+      }
+      editor.appendChild(sec);   // moves existing nodes into order; new ones appended
+      prev = g.id;
+    }
+  }
+  // Flex weights + pane parenting are cheap and never reattach terminals.
+  for (const g of want) {
+    const sec = existing.get(g.id);
+    if (sec) sec.style.flex = `${g.flex || 1} 1 0`;
+  }
+  for (const p of panes.values()) placePane(p);
+}
+
+// Drag a sash to resize the two groups it sits between.
+function wireSash(sash, leftId, rightId) {
+  sash.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const leftSec = editor.querySelector(`.group[data-group="${leftId}"]`);
+    const rightSec = editor.querySelector(`.group[data-group="${rightId}"]`);
+    const lg = groupById(leftId), rg = groupById(rightId);
+    if (!leftSec || !rightSec || !lg || !rg) return;
+    const startX = e.clientX;
+    const lw = leftSec.getBoundingClientRect().width;
+    const rw = rightSec.getBoundingClientRect().width;
+    const totalFlex = (lg.flex || 1) + (rg.flex || 1);
+    sash.classList.add('dragging');
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      const nlw = Math.max(140, lw + dx);
+      const nrw = Math.max(140, rw - dx);
+      const sum = nlw + nrw;
+      lg.flex = totalFlex * (nlw / sum);
+      rg.flex = totalFlex * (nrw / sum);
+      leftSec.style.flex = `${lg.flex} 1 0`;
+      rightSec.style.flex = `${rg.flex} 1 0`;
+      for (const p of [...panesOf(lg.active), ...panesOf(rg.active)]) fitPane(p);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      sash.classList.remove('dragging');
+      relayout();
+      scheduleSave();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
 // Rebuild the panes Map to match the current DOM order (after a drag). This
-// keeps per-workspace ordering — and therefore persistence — in sync.
+// keeps per-workspace ordering — and therefore persistence — in sync. Panes are
+// spread across each group's grid, so we walk the grids in on-screen order.
 function rebuildPaneOrder() {
   const next = new Map();
-  for (const el of grid.children) {
-    const id = el.dataset.id;
-    if (id && panes.has(id)) next.set(id, panes.get(id));
+  for (const gridEl of editor.querySelectorAll('.group-grid')) {
+    for (const el of gridEl.children) {
+      const id = el.dataset.id;
+      if (id && panes.has(id)) next.set(id, panes.get(id));
+    }
   }
   for (const [id, p] of panes) if (!next.has(id)) next.set(id, p); // safety
   panes = next;
 }
 
+// Lay out each group's grid for its active tab's pane count.
 function relayout() {
-  const n = panesOf(store ? store.active : null).length; // only the visible workspace
-  const cols = layoutColumns(n);
-  const rows = Math.ceil(n / cols) || 1;
-  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-  grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  for (const g of (store.groups || [])) {
+    const gridEl = groupGridEl(g.id);
+    if (!gridEl) continue;
+    const n = g.active ? panesOf(g.active).length : 0;
+    const cols = layoutColumns(n);
+    const rows = Math.ceil(n / cols) || 1;
+    gridEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    gridEl.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  }
   // fit terminals after the DOM settles
   requestAnimationFrame(() => {
     for (const p of panes.values()) fitPane(p);
@@ -278,7 +429,7 @@ function createPane(opts = {}) {
   const label = opts.label || `Agent ${panesOf(workspace).length + 1}`;
 
   const el = document.createElement('div');
-  el.className = 'pane' + (workspace !== store.active ? ' hidden' : '');
+  el.className = 'pane' + (visibleTabIds().has(workspace) ? '' : ' hidden');
   el.dataset.id = id;
   el.innerHTML = `
     <div class="pane-head" draggable="true">
@@ -287,12 +438,16 @@ function createPane(opts = {}) {
       <span class="pane-title" contenteditable="true" spellcheck="false" draggable="false"></span>
       <span class="pane-state-label state-dead">init</span>
       <span class="pane-status"></span>
+      <button class="pane-btn explorer" title="Open File Explorer for this folder (F4)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
       <button class="pane-btn paste-path" title="Insert file/image path from the Windows clipboard (Ctrl+Shift+V)">ℹ</button>
       <button class="pane-btn restart" title="Restart command">↻</button>
       <button class="pane-btn close" title="Close pane">✕</button>
     </div>
     <div class="pane-body"></div>`;
-  grid.appendChild(el);
+  // Park the pane in its group's grid (falls back to the first group's grid).
+  const hostGrid = (groupOf(workspace) && groupGridEl(groupOf(workspace).id))
+    || editor.querySelector('.group-grid');
+  if (hostGrid) hostGrid.appendChild(el); else editor.appendChild(el);
 
   const term = new Terminal({
     theme: xtermTheme(themeId),
@@ -450,6 +605,11 @@ function createPane(opts = {}) {
     focusPane(p);
     insertClipboardPath(p);
   });
+  el.querySelector('.explorer').addEventListener('click', (e) => {
+    e.stopPropagation();
+    focusPane(p);
+    openExplorerForPane(p);
+  });
   // Enter on the title commits the rename instead of inserting a newline.
   p.title.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); p.title.blur(); }
@@ -489,7 +649,7 @@ function createPane(opts = {}) {
   });
 
   spawnPty(p);
-  if (workspace === store.active) { relayout(); focusPane(p); }
+  if (visibleTabIds().has(workspace)) { relayout(); focusPane(p); }
   scheduleSave();
   return p;
 }
@@ -569,9 +729,31 @@ function shellQuote(s) { return `'${s.replace(/'/g, `'\\''`)}'`; }
 function cmdValue() { return document.getElementById('cmd').value.trim(); }
 function cwdInput() { return document.getElementById('cwd').value.trim(); }
 
+// Mark which group has keyboard focus (a faint accent line on its tab strip).
+function highlightActiveGroup() {
+  for (const sec of editor.querySelectorAll('.group'))
+    sec.classList.toggle('focused-group', sec.dataset.group === store.activeGroup);
+}
+
+// Make `id` the focused group: swap the toolbar/footer/remote to its active tab.
+function focusGroup(id) {
+  if (!groupById(id)) return;
+  if (store.activeGroup === id) { highlightActiveGroup(); return; }
+  if (store.tabs[store.active]) store.tabs[store.active].toolbar = currentToolbar();
+  store.activeGroup = id;
+  syncOpenActive();
+  if (store.tabs[store.active]) restoreToolbar(store.tabs[store.active].toolbar);
+  highlightActiveGroup();
+  renderRemote();
+  renderGitStatus();
+}
+
 function focusPane(p) {
   for (const q of panes.values()) q.el.classList.toggle('focused', q === p);
   focusedId = p.id;
+  // Focusing a pane focuses its group (drives the toolbar/footer/remote pill).
+  const g = groupOf(p.workspace);
+  if (g && g.id !== store.activeGroup) focusGroup(g.id);
   // Returning to the pane answers its "your turn" — clear the attention flag and
   // repaint its badge right away (don't wait for the next status tick).
   if (p.awaiting || p.settling) {
@@ -593,6 +775,10 @@ function enterZen(p) {
   zenId = p.id;
   document.body.classList.add('zen');
   for (const q of panes.values()) q.el.classList.toggle('zen-target', q === p);
+  // Mark the target's group so CSS can hide the other groups + sashes in zen.
+  const g = groupOf(p.workspace);
+  for (const sec of editor.querySelectorAll('.group'))
+    sec.classList.toggle('zen-group', !!g && sec.dataset.group === g.id);
   focusPane(p);
   clearTimeout(zenFitTimer);
   zenFitTimer = setTimeout(() => { fitPane(p); p.term.focus(); }, 240); // after transition
@@ -605,10 +791,11 @@ function exitZen() {
   zenId = null;
   document.body.classList.remove('zen');
   if (p) p.el.classList.remove('zen-target');
+  for (const sec of editor.querySelectorAll('.group.zen-group')) sec.classList.remove('zen-group');
   relayout();
   clearTimeout(zenFitTimer);
   zenFitTimer = setTimeout(() => {
-    for (const q of panesOf(store.active)) fitPane(q);
+    for (const q of visiblePanes()) fitPane(q);
     if (p) p.term.focus();
   }, 240);
 }
@@ -669,7 +856,19 @@ function freshStore() {
   // A fresh install (or an emptied store) boots to the welcome screen — we don't
   // auto-load any default workspace. This is the same empty state you reach by
   // closing the last tab: no open tabs, no active tab, nothing in the registry.
-  return { version: 4, active: null, open: [], tabs: {}, recents: {} };
+  return { version: 5, active: null, open: [], tabs: {}, recents: {}, groups: [], activeGroup: null };
+}
+// Wrap a flat (open, active) tab list into a single editor group — the shape a
+// pre-split (v4 or earlier) save upgrades into.
+function groupsFromFlat(open, active) {
+  if (!open || !open.length) return { groups: [], activeGroup: null };
+  const g = {
+    id: 'g' + (++gSeq),
+    open: [...open],
+    active: active && open.includes(active) ? active : open[0],
+    flex: 1,
+  };
+  return { groups: [g], activeGroup: g.id };
 }
 // Build a v4 store from the older "named workspace" shape.
 function tabsFromNamed(workspaces, openNames, activeName) {
@@ -687,7 +886,43 @@ function tabsFromNamed(workspaces, openNames, activeName) {
   if (!open.length) return freshStore();
   return { version: 4, active: activeId || open[0], open, tabs, recents };
 }
+// Bring any saved store up to the current (v5) shape: first normalize to the
+// flat v4 layout, then fold it into the editor-group structure.
 function normalizeStore(s) {
+  if (s && s.version === 5 && s.tabs && Array.isArray(s.groups)) {
+    for (const id of Object.keys(s.tabs)) {                  // keep tabSeq ahead of saved ids
+      const num = parseInt(String(id).replace(/^t/, ''), 10);
+      if (Number.isFinite(num) && num > tabSeq) tabSeq = num;
+    }
+    for (const g of s.groups) {                              // keep gSeq ahead of saved ids
+      const num = parseInt(String(g.id).replace(/^g/, ''), 10);
+      if (Number.isFinite(num) && num > gSeq) gSeq = num;
+      g.open = (g.open || []).filter((id) => s.tabs[id]);
+    }
+    s.groups = s.groups.filter((g) => g.open.length);
+    s.recents = s.recents || {};
+    if (!s.groups.length) return { ...freshStore(), recents: s.recents, theme: s.theme, zoom: s.zoom };
+    for (const g of s.groups) {
+      if (!g.open.includes(g.active)) g.active = g.open[0];
+      if (!g.flex) g.flex = 1;
+    }
+    if (!s.groups.find((g) => g.id === s.activeGroup)) s.activeGroup = s.groups[0].id;
+    s.open = s.groups.flatMap((g) => g.open);
+    s.active = (s.groups.find((g) => g.id === s.activeGroup) || s.groups[0]).active;
+    for (const id of s.open) {
+      const nm = s.tabs[id].name;
+      if (nm && !s.recents[nm]) s.recents[nm] = { toolbar: s.tabs[id].toolbar || defaultToolbar() };
+    }
+    return s;
+  }
+  const v4 = normalizeToV4(s);
+  v4.version = 5;
+  const { groups, activeGroup } = groupsFromFlat(v4.open, v4.active);
+  v4.groups = groups;
+  v4.activeGroup = activeGroup;
+  return v4;
+}
+function normalizeToV4(s) {
   if (s && s.version === 4 && s.tabs && Array.isArray(s.open)) {
     for (const id of Object.keys(s.tabs)) {                  // keep tabSeq ahead of saved ids
       const num = parseInt(String(id).replace(/^t/, ''), 10);
@@ -795,60 +1030,73 @@ function escapeHtml(s) {
 }
 
 function renderTabs() {
-  const tabsEl = document.getElementById('tabs');
-  tabsEl.innerHTML = '';
-  // count duplicate names so we can disambiguate them with "#k"
+  ensureGroupsDom();   // make sure each group's section + tab strip exist
+  // Global duplicate-name counts so the "#k" suffix stays stable across groups.
   const counts = {};
   for (const id of store.open) { const nm = store.tabs[id].name; counts[nm] = (counts[nm] || 0) + 1; }
   const seen = {};
-  let i = 0;
-  for (const id of store.open) {
-    const t = store.tabs[id];
-    const base = t.name;
-    let disp = base;
-    if (counts[base] > 1) { seen[base] = (seen[base] || 0) + 1; disp = `${base} #${seen[base]}`; }
-    const n = ++i; // 1-based tab position
-    const tab = document.createElement('div');
-    tab.className = 'tab' + (id === store.active ? ' active' : '');
-    tab.dataset.tab = id;
-    tab.title = n <= 9 ? `${disp}  ·  Ctrl+${n}` : disp;
-    tab.innerHTML = `
-      <span class="tab-num">${n <= 9 ? n : ''}</span>
-      <span class="tab-dot"></span>
-      <span class="tab-name" spellcheck="false">${escapeHtml(disp)}</span>
-      <span class="tab-meta"></span>
-      <button class="tab-close" title="Close tab (reopen from Open)">✕</button>`;
-    const nameEl = tab.querySelector('.tab-name');
+  for (const g of (store.groups || [])) {
+    const sec = editor.querySelector(`.group[data-group="${g.id}"]`);
+    if (!sec) continue;
+    const tabsEl = sec.querySelector('.group-tabs');
+    tabsEl.innerHTML = '';
+    const focusedGroup = g.id === store.activeGroup;
+    let i = 0;
+    for (const id of g.open) {
+      const t = store.tabs[id];
+      const base = t.name;
+      let disp = base;
+      if (counts[base] > 1) { seen[base] = (seen[base] || 0) + 1; disp = `${base} #${seen[base]}`; }
+      const n = ++i; // 1-based position within this group
+      // Ctrl+1..9 acts on the focused group, so only annotate those tabs.
+      const numbered = focusedGroup && n <= 9;
+      const tab = document.createElement('div');
+      tab.className = 'tab' + (id === g.active ? ' active' : '');
+      tab.dataset.tab = id;
+      tab.title = numbered ? `${disp}  ·  Ctrl+${n}` : disp;
+      tab.innerHTML = `
+        <span class="tab-num">${numbered ? n : ''}</span>
+        <span class="tab-dot"></span>
+        <span class="tab-name" spellcheck="false">${escapeHtml(disp)}</span>
+        <span class="tab-meta"></span>
+        <button class="tab-close" title="Close tab (reopen from Open)">✕</button>`;
+      const nameEl = tab.querySelector('.tab-name');
 
-    tab.addEventListener('mousedown', (e) => {
-      if (e.target.classList.contains('tab-close')) return;
-      if (nameEl.isContentEditable) return; // mid-rename: let the click edit text
-      switchTab(id);
-    });
-    nameEl.addEventListener('dblclick', (e) => {
-      e.stopPropagation();
-      nameEl.textContent = base; // edit the raw name, not the "#k" display
-      nameEl.contentEditable = 'true';
-      nameEl.focus();
-      document.getSelection().selectAllChildren(nameEl);
-    });
-    nameEl.addEventListener('keydown', (e) => {
-      e.stopPropagation();
-      if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); }
-      if (e.key === 'Escape') { e.preventDefault(); nameEl.textContent = disp; nameEl.blur(); }
-    });
-    nameEl.addEventListener('blur', () => {
-      nameEl.contentEditable = 'false';
-      renameTab(id, (nameEl.textContent || '').trim());
-    });
-    tab.querySelector('.tab-close').addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeTab(id);
-    });
-    tabsEl.appendChild(tab);
+      tab.addEventListener('mousedown', (e) => {
+        if (e.target.classList.contains('tab-close')) return;
+        if (nameEl.isContentEditable) return; // mid-rename: let the click edit text
+        switchTab(id);
+      });
+      tab.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showTabMenu(e, id);
+      });
+      nameEl.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        nameEl.textContent = base; // edit the raw name, not the "#k" display
+        nameEl.contentEditable = 'true';
+        nameEl.focus();
+        document.getSelection().selectAllChildren(nameEl);
+      });
+      nameEl.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); nameEl.textContent = disp; nameEl.blur(); }
+      });
+      nameEl.addEventListener('blur', () => {
+        nameEl.contentEditable = 'false';
+        renameTab(id, (nameEl.textContent || '').trim());
+      });
+      tab.querySelector('.tab-close').addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeTab(id);
+      });
+      tabsEl.appendChild(tab);
+    }
   }
-  // No open tabs → reveal the welcome screen and hide the (empty) grid.
+  // No open tabs → reveal the welcome screen and hide the (empty) editor.
   document.body.classList.toggle('no-tabs', store.open.length === 0);
+  highlightActiveGroup();
   updateTabStatus();
 }
 
@@ -870,9 +1118,20 @@ function updateTabStatus() {
   }
 }
 
-// Show the active tab's panes; hide the rest (all stay alive in the background).
+// Panes on screen right now — the active tab of each group.
+function visiblePanes() {
+  const vis = visibleTabIds();
+  return [...panes.values()].filter((p) => vis.has(p.workspace));
+}
+
+// Show each group's active-tab panes; hide the rest (all stay alive in the
+// background). Also keeps every pane parented under its group's grid.
 function applyVisibility() {
-  for (const p of panes.values()) p.el.classList.toggle('hidden', p.workspace !== store.active);
+  const vis = visibleTabIds();
+  for (const p of panes.values()) {
+    placePane(p);
+    p.el.classList.toggle('hidden', !vis.has(p.workspace));
+  }
 }
 
 function showActiveWorkspace() {
@@ -886,11 +1145,11 @@ function showActiveWorkspace() {
     return;
   }
   restoreToolbar(store.tabs[store.active].toolbar);
+  renderTabs();          // (re)build group sections before parenting/laying out
   applyVisibility();
   relayout();
-  for (const p of panesOf(store.active)) fitPane(p);
+  for (const p of visiblePanes()) fitPane(p);
   renderGitStatus();   // footer reflects the now-visible tab's focused pane
-  renderTabs();
   updateSummary();
   renderRemote();   // pill reflects the now-active workspace's connection
 }
@@ -898,10 +1157,15 @@ function showActiveWorkspace() {
 // Switching tabs is non-destructive: other tabs' terminals keep running in the
 // background; we only change what's visible.
 function switchTab(id) {
-  if (!store.open.includes(id) || id === store.active) return;
+  const g = groupOf(id);
+  if (!g) return;
   if (isZen()) exitZen();
+  // Already the active tab of the already-focused group → nothing to do.
+  if (g.id === store.activeGroup && g.active === id) return;
   if (store.tabs[store.active]) store.tabs[store.active].toolbar = currentToolbar();
-  store.active = id;
+  g.active = id;
+  store.activeGroup = g.id;
+  syncOpenActive();
   showActiveWorkspace();
   const first = panesOf(id)[0];
   if (first) focusPane(first);
@@ -910,15 +1174,21 @@ function switchTab(id) {
 }
 
 // Open a NEW tab instance for `name` (always a fresh tab — you can have several
-// tabs for the same workspace). Seeds from `paneDefs` or DEFAULT_PANES.
+// tabs for the same workspace). Seeds from `paneDefs` or DEFAULT_PANES. The tab
+// lands in the focused editor group.
 function openTab(name, toolbar, paneDefs) {
   if (isZen()) exitZen();
   if (store.tabs[store.active]) store.tabs[store.active].toolbar = currentToolbar();
   const id = 't' + (++tabSeq);
   store.tabs[id] = { name, toolbar: { ...toolbar }, panes: [] };
-  store.open.push(id);
-  store.active = id;
+  let g = activeGroupObj();
+  if (!g) { g = { id: 'g' + (++gSeq), open: [], active: null, flex: 1 }; store.groups.push(g); }
+  g.open.push(id);
+  g.active = id;
+  store.activeGroup = g.id;
+  syncOpenActive();
   restoreToolbar(store.tabs[id].toolbar);
+  renderTabs();        // build the group's DOM before any pane is parented in
   applyVisibility();   // other tabs -> hidden, but still running
   if (paneDefs && paneDefs.length) {
     for (const sp of paneDefs) createPane({ workspace: id, label: sp.label, pinned: sp.pinned, cwd: sp.cwd, command: sp.command });
@@ -1356,11 +1626,23 @@ async function closeTab(id) {
     panes.delete(p.id);
   }
   delete store.tabs[id];
-  store.open = store.open.filter((x) => x !== id);
-  if (store.active === id) {
+  // Remove the tab from its group; if that empties the group, drop the group
+  // (its section + sash disappear and the neighbors reflow to fill the space).
+  const g = groupOf(id);
+  const wasActiveTab = id === store.active;
+  const wasFocusedGroup = g && g.id === store.activeGroup;
+  if (g) {
+    g.open = g.open.filter((x) => x !== id);
+    if (g.active === id) g.active = g.open[0] || null;
+    if (!g.open.length) store.groups = store.groups.filter((x) => x !== g);
+  }
+  if (!store.groups.find((x) => x.id === store.activeGroup)) {
+    store.activeGroup = store.groups[0] ? store.groups[0].id : null;
+  }
+  syncOpenActive();
+  if (wasActiveTab || wasFocusedGroup || !store.open.length) {
     if (isZen()) exitZen();
-    // Falls back to null when that was the last tab → the welcome screen.
-    store.active = store.open[0] || null;
+    // Falls back to the welcome screen when that was the last tab.
     showActiveWorkspace();
     const first = store.active ? panesOf(store.active)[0] : null;
     if (first) focusPane(first);
@@ -1370,6 +1652,105 @@ async function closeTab(id) {
   }
   saveState();
   flash(`closed: ${t.name}`);
+}
+
+// ---- split / move tabs between editor groups -------------------------------
+// Reparent a tab (with its live panes) into another group. Used by the tab
+// context menu. The tab becomes the active tab of the destination group, which
+// also becomes the focused group; an emptied source group is dropped.
+function moveTabToGroup(id, targetGroupId) {
+  const src = groupOf(id);
+  const dst = groupById(targetGroupId);
+  if (!src || !dst || src === dst) return;
+  if (isZen()) exitZen();
+  if (store.tabs[store.active]) store.tabs[store.active].toolbar = currentToolbar();
+  src.open = src.open.filter((x) => x !== id);
+  if (src.active === id) src.active = src.open[0] || null;
+  dst.open.push(id);
+  dst.active = id;
+  if (!src.open.length) store.groups = store.groups.filter((x) => x !== src);
+  store.activeGroup = dst.id;
+  syncOpenActive();
+  showActiveWorkspace();   // rebuilds the group DOM + reparents panes + lays out
+  const first = panesOf(id)[0];
+  if (first) focusPane(first);
+  saveState();
+  flash('moved tab');
+}
+
+// Split: peel a tab off into a NEW group inserted just to the right of its own.
+function splitTabRight(id) {
+  const src = groupOf(id);
+  if (!src) return;
+  if (src.open.length < 2) { flash('only tab in this group — nothing to split'); return; }
+  if (isZen()) exitZen();
+  if (store.tabs[store.active]) store.tabs[store.active].toolbar = currentToolbar();
+  const ng = { id: 'g' + (++gSeq), open: [], active: null, flex: src.flex || 1 };
+  store.groups.splice(store.groups.indexOf(src) + 1, 0, ng);
+  src.open = src.open.filter((x) => x !== id);
+  if (src.active === id) src.active = src.open[0] || null;
+  ng.open.push(id);
+  ng.active = id;
+  store.activeGroup = ng.id;
+  syncOpenActive();
+  showActiveWorkspace();
+  const first = panesOf(id)[0];
+  if (first) focusPane(first);
+  saveState();
+  flash('split → new group');
+}
+
+let tabMenuEl = null;
+function closeTabMenu() {
+  if (tabMenuEl) { tabMenuEl.remove(); tabMenuEl = null; }
+  document.removeEventListener('mousedown', onTabMenuOutside, true);
+  document.removeEventListener('keydown', onTabMenuKey, true);
+}
+function onTabMenuOutside(e) { if (tabMenuEl && !tabMenuEl.contains(e.target)) closeTabMenu(); }
+function onTabMenuKey(e) { if (e.key === 'Escape') { e.preventDefault(); closeTabMenu(); } }
+
+// Right-click a tab: split it into a new group, move it to another group, or
+// close it (VSCode's editor-tab context menu, pared to what we support).
+function showTabMenu(ev, id) {
+  closeTabMenu();
+  const src = groupOf(id);
+  if (!src) return;
+  const menu = document.createElement('div');
+  menu.className = 'app-menu';
+  tabMenuEl = menu;
+
+  const items = [
+    { label: 'Split Right (new group)', disabled: src.open.length < 2, run: () => splitTabRight(id) },
+  ];
+  const others = store.groups.filter((g) => g.id !== src.id);
+  if (others.length) {
+    items.push({ sep: true });
+    for (const g of others) {
+      items.push({ label: `Move to Group ${store.groups.indexOf(g) + 1}`, run: () => moveTabToGroup(id, g.id) });
+    }
+  }
+  items.push({ sep: true }, { label: 'Close Tab', run: () => closeTab(id) });
+
+  for (const it of items) {
+    if (it.sep) { const s = document.createElement('div'); s.className = 'menu-sep'; menu.appendChild(s); continue; }
+    const b = document.createElement('button');
+    b.className = 'menu-item' + (it.disabled ? ' disabled' : '');
+    b.textContent = it.label;
+    if (it.disabled) b.disabled = true;
+    else b.addEventListener('click', () => { closeTabMenu(); it.run(); });
+    menu.appendChild(b);
+  }
+
+  document.body.appendChild(menu);
+  // Keep the menu on-screen near the cursor.
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.min(ev.clientX, vw - r.width - 4)}px`;
+  menu.style.top = `${Math.min(ev.clientY, vh - r.height - 4)}px`;
+  setTimeout(() => {
+    document.addEventListener('mousedown', onTabMenuOutside, true);
+    document.addEventListener('keydown', onTabMenuKey, true);
+  }, 0);
 }
 
 // A yes/no confirmation modal. Resolves to true (confirmed) or false.
@@ -1826,7 +2207,7 @@ function exitSuperSaiyan() {
   ssStack = [];
   ssSuppressed.clear();
   // Whatever pane was focused before stays focused; refit visible panes.
-  for (const q of panesOf(store.active)) fitPane(q);
+  for (const q of visiblePanes()) fitPane(q);
 }
 
 function buildSuperSaiyanOverlay() {
@@ -1977,6 +2358,8 @@ function ssDismissFront() {
 
 function handleShortcut(e) {
   if (e.key === 'F11') { toggleZenFocused(); return true; }
+  // F4 — open the File Explorer window rooted at the focused pane's folder.
+  if (e.key === 'F4') { openExplorerForPane(); return true; }
   if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) { toggleSuperSaiyan(); return true; }
   if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.key === 'j')) { jumpToAttention(); return true; }
   // Ctrl+Shift+V — insert the path of a file/image copied to the Windows clipboard.
@@ -2013,15 +2396,26 @@ function insertClipboardPath(target) {
   }).catch(() => flash('Could not read the Windows clipboard'));
 }
 
+// Open the File Explorer window for a pane's folder. The main process resolves
+// the pane's *live* cwd from its pid (so it follows `cd`), falling back to the
+// tracked cwd. Without an argument, acts on the focused pane.
+function openExplorerForPane(target) {
+  const p = target || panes.get(focusedId);
+  if (!p) { flash('No pane to open the explorer for'); return; }
+  if (!window.hydra.openExplorer) return;
+  window.hydra.openExplorer({ pid: p.pid, cwd: p.cwd || '' });
+}
+
+// Ctrl+1..9 and Ctrl+Tab act within the focused group's tab strip.
 function switchTabByIndex(i) {
-  const ids = store.open;
-  if (ids[i] && ids[i] !== store.active) switchTab(ids[i]);
+  const g = activeGroupObj();
+  if (g && g.open[i] && g.open[i] !== store.active) switchTab(g.open[i]);
 }
 function switchTabBy(delta) {
-  const ids = store.open;
-  if (ids.length < 2) return;
-  const cur = ids.indexOf(store.active);
-  switchTab(ids[(cur + delta + ids.length) % ids.length]);
+  const g = activeGroupObj();
+  if (!g || g.open.length < 2) return;
+  const cur = g.open.indexOf(g.active);
+  switchTab(g.open[(cur + delta + g.open.length) % g.open.length]);
 }
 
 // Apply a detector result (or a bare state string) to a pane's UI.
@@ -2310,19 +2704,21 @@ window.hydra.onZoom(({ level }) => {
 });
 
 // Live reorder while dragging a pane: move the dragged element before/after the
-// pane under the cursor (left half = before, right half = after).
-grid.addEventListener('dragover', (e) => {
+// pane under the cursor (left half = before, right half = after). Delegated on
+// #editor; reordering only happens within the dragged pane's own group grid.
+editor.addEventListener('dragover', (e) => {
   if (!draggingEl) return;
+  const homeGrid = draggingEl.parentElement;
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
   const target = e.target.closest('.pane');
   if (!target || target === draggingEl || target.classList.contains('hidden')
-      || target.parentElement !== grid) return;
+      || target.parentElement !== homeGrid) return;
   const r = target.getBoundingClientRect();
   const before = e.clientX < r.left + r.width / 2;
-  grid.insertBefore(draggingEl, before ? target : target.nextSibling);
+  homeGrid.insertBefore(draggingEl, before ? target : target.nextSibling);
 });
-grid.addEventListener('drop', (e) => { if (draggingEl) e.preventDefault(); });
+editor.addEventListener('drop', (e) => { if (draggingEl) e.preventDefault(); });
 
 // Safety net: a file dropped anywhere other than a terminal body would otherwise
 // make Electron navigate the whole window to that file. Swallow those drops so a
@@ -2349,6 +2745,8 @@ window.addEventListener('beforeunload', () => { clearTimeout(saveTimer); saveSta
   document.getElementById('cwd').placeholder = `working dir (default: ${env.home})`;
 
   store = normalizeStore(await window.hydra.loadState());
+  ensureGroups();        // validate the group structure…
+  ensureGroupsDom();     // …and build its DOM before any pane is parented into it
 
   // Apply the saved color theme before any terminal is created, so panes spawn
   // with the right palette and the chrome paints correctly from the first frame.

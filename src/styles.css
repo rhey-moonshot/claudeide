@@ -342,7 +342,35 @@ body { display: flex; flex-direction: column; }
 #flash.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* ---- workspace tab bar ---- */
-#tabbar {
+/* ---- editor area: a row of split groups, each with its own tab strip ---- */
+#editor {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  min-width: 0;
+  background: var(--border);   /* the sash gap color shows through */
+}
+.group {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+}
+/* A faint accent line marks which group has keyboard focus. */
+.group.focused-group > .group-tabbar { box-shadow: inset 0 2px 0 var(--accent); }
+
+/* Resizable divider between adjacent groups. */
+.group-sash {
+  flex: 0 0 4px;
+  cursor: col-resize;
+  background: var(--border);
+}
+.group-sash:hover, .group-sash.dragging { background: var(--accent); }
+
+.group-tabbar {
   display: flex;
   align-items: stretch;
   height: 36px;
@@ -352,7 +380,7 @@ body { display: flex; flex-direction: column; }
   overflow-x: auto;
   user-select: none;
 }
-#tabs { display: flex; align-items: stretch; }
+.group-tabs { display: flex; align-items: stretch; }
 
 /* VSCode tabs: full-height, square, separated by hairlines; the active tab
    carries the editor background and a colored top border. */
@@ -412,20 +440,20 @@ body { display: flex; flex-direction: column; }
 }
 .tab-add:hover { color: var(--bright); background: var(--panel-2); }
 
-/* ---- grid (editor area) ---- */
-#grid {
+/* ---- grid (one per editor group) ---- */
+.group-grid {
   flex: 1;
   display: grid;
-  gap: 1px;                 /* VSCode separates editor groups by a hairline */
+  gap: 1px;                 /* VSCode separates panes by a hairline */
   padding: 0;
   background: var(--border);/* gap color shows through */
   min-height: 0;
+  min-width: 0;
 }
 
 /* ---- welcome screen (shown when no tab is open) ---- */
 #welcome { display: none; }
-body.no-tabs #grid,
-body.no-tabs #tabbar { display: none; }
+body.no-tabs #editor { display: none; }
 body.no-tabs #welcome {
   flex: 1;
   display: flex;
@@ -710,6 +738,8 @@ body.zen #statusbar { display: none; }   /* chrome melts away in focus mode */
   cursor: pointer; font-size: 14px; line-height: 1; padding: 3px 6px; border-radius: var(--radius-sm);
 }
 .pane-btn:hover { color: var(--bright); background: var(--hover); }
+.pane-btn.explorer { display: inline-flex; align-items: center; }
+.pane-btn.explorer svg { width: 13px; height: 13px; }
 
 .pane-body { flex: 1; min-height: 0; position: relative; }
 .pane-body .xterm { height: 100%; padding: 4px 6px; }
@@ -752,12 +782,12 @@ body.zen #statusbar { display: none; }   /* chrome melts away in focus mode */
 /* ---- focus (zen) mode ---- */
 /* Chrome collapses away smoothly, leaving just the focused terminal. */
 #toolbar { max-height: 64px; overflow: hidden; }
-#tabbar  { max-height: 52px; overflow-x: auto; overflow-y: hidden; }
-#toolbar, #tabbar {
+.group-tabbar  { max-height: 52px; overflow-x: auto; overflow-y: hidden; }
+#toolbar, .group-tabbar {
   transition: max-height .22s ease, opacity .2s ease, padding .22s ease;
 }
 body.zen #toolbar,
-body.zen #tabbar {
+body.zen .group-tabbar {
   max-height: 0;
   opacity: 0;
   padding-top: 0;
@@ -765,7 +795,11 @@ body.zen #tabbar {
   pointer-events: none;
   border-bottom-color: transparent;
 }
-body.zen #grid {
+/* Zen expands one pane: hide the other groups and the sashes, and collapse the
+   target pane's group grid to a single cell. */
+body.zen .group:not(.zen-group),
+body.zen .group-sash { display: none; }
+body.zen .group-grid {
   grid-template-columns: 1fr !important;
   grid-template-rows: 1fr !important;
   gap: 0;
@@ -876,6 +910,8 @@ body.zen #zen-exit { display: inline-flex; align-items: center; gap: 6px; opacit
   padding: 6px 12px; font-size: 14px; cursor: pointer; border-radius: var(--radius-sm);
 }
 .app-menu .menu-item:hover { background: var(--btn-hover); color: var(--bright); }
+.app-menu .menu-item.disabled { color: var(--muted); cursor: default; opacity: 0.5; }
+.app-menu .menu-item.disabled:hover { background: transparent; color: var(--muted); }
 .app-menu .menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 /* menu rows with a keyboard-shortcut hint (e.g. Zoom) */
 .app-menu .menu-item:has(.mi-hint) { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
@@ -969,3 +1005,166 @@ body.zen #zen-exit { display: inline-flex; align-items: center; gap: 6px; opacit
 .ss-card-tag { font-size: 12px; color: var(--ss-aura); flex: none; }
 .ss-card-body { flex: 1; min-height: 0; padding: 6px 8px; }
 .ss-card-body .xterm { height: 100%; }
+
+/* ===========================================================================
+   File Explorer window (explorer.html / explorer.js)
+   A standalone frameless window: custom title bar, a lazily-expanded file tree,
+   and a tabbed textarea editor. Reuses the theme variables and window-control
+   look from the main window.
+   =========================================================================== */
+.explorer-body { display: flex; flex-direction: column; height: 100%; }
+
+/* ---- title bar ---- */
+#xp-titlebar {
+  display: flex; align-items: center; gap: 8px;
+  height: 36px; padding: 0 0 0 10px;
+  background: var(--titlebar);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto; user-select: none;
+}
+.xp-title-logo { color: var(--accent); display: inline-flex; align-items: center; }
+.xp-title-text { font-size: 13px; color: var(--text); font-weight: 600; }
+.xp-title-path {
+  font-size: 12px; color: var(--muted); margin-left: 4px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis; flex: 1 1 auto;
+}
+#xp-titlebar .win-btn {
+  width: 44px; align-self: stretch; display: inline-flex; align-items: center;
+  justify-content: center; padding: 0; background: transparent; border: none;
+  border-radius: 0; color: var(--muted); cursor: pointer;
+}
+#xp-titlebar .win-btn:hover { background: var(--hover); color: var(--bright); }
+#xp-titlebar .win-close:hover { background: #e81123; color: #fff; }
+
+/* ---- layout: sidebar | sash | editor ---- */
+#xp-main { flex: 1 1 auto; display: flex; min-height: 0; }
+#xp-sidebar {
+  width: 240px; flex: 0 0 auto; min-width: 140px;
+  background: var(--panel); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.xp-side-head {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 30px; padding: 0 6px 0 12px; flex: 0 0 auto;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.xp-side-title {
+  font-size: 11px; color: var(--muted); font-weight: 600;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.xp-side-actions { display: flex; gap: 2px; flex: none; }
+.xp-side-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; background: transparent;
+  border: none; border-radius: var(--radius-sm); color: var(--muted); cursor: pointer;
+}
+.xp-side-btn:hover { background: var(--hover); color: var(--bright); }
+
+/* ---- the tree ---- */
+.xp-tree { flex: 1 1 auto; overflow: auto; padding: 2px 0 8px; outline: none; }
+.xp-children[hidden] { display: none; }
+.xp-row-label {
+  display: flex; align-items: center; gap: 4px;
+  height: 22px; cursor: pointer; user-select: none;
+  padding-left: calc(8px + var(--depth, 0) * 12px); padding-right: 8px;
+  color: var(--text); font-size: 13px; white-space: nowrap;
+}
+.xp-row-label:hover { background: var(--hover); }
+.xp-row.active > .xp-row-label { background: var(--row-active); }
+.xp-row-name { overflow: hidden; text-overflow: ellipsis; }
+.xp-chevron { color: var(--muted); flex: none; transition: transform .1s ease; }
+.xp-row.open > .xp-row-label .xp-chevron { transform: rotate(90deg); }
+.xp-chevron-spacer { width: 14px; flex: none; }
+.xp-ico { flex: none; }
+.xp-ico-folder { color: var(--accent); }
+.xp-ico-file { color: var(--muted); }
+.xp-tree-empty {
+  font-size: 12px; color: var(--muted); font-style: italic;
+  padding: 2px 8px 2px calc(20px + var(--depth, 0) * 12px);
+}
+
+/* ---- sash ---- */
+#xp-sash { width: 4px; flex: 0 0 auto; cursor: col-resize; background: var(--border); }
+#xp-sash:hover { background: var(--accent); }
+body.xp-resizing { cursor: col-resize; user-select: none; }
+
+/* ---- editor area ---- */
+#xp-editor-area { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.xp-tabs {
+  display: flex; align-items: stretch; height: 35px; flex: 0 0 auto;
+  background: var(--panel); border-bottom: 1px solid var(--border);
+  overflow-x: auto; overflow-y: hidden;
+}
+.xp-tab {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 8px 0 12px; max-width: 200px; flex: 0 0 auto;
+  background: var(--panel-2); border-right: 1px solid var(--border);
+  color: var(--muted); font-size: 13px; cursor: pointer; user-select: none;
+}
+.xp-tab:hover { background: var(--hover); }
+.xp-tab.active { background: var(--bg); color: var(--text); box-shadow: inset 0 1px 0 var(--accent); }
+.xp-tab-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.xp-tab-dirty { width: 8px; flex: none; }
+.xp-tab.dirty .xp-tab-dirty::before {
+  content: ''; display: block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text);
+}
+.xp-tab.dirty .xp-tab-close { display: none; }
+.xp-tab:hover .xp-tab-close { display: inline-flex; }
+.xp-tab:hover.dirty .xp-tab-dirty { display: none; }
+.xp-tab-close {
+  display: none; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0; background: transparent; border: none;
+  border-radius: var(--radius-sm); color: var(--muted); cursor: pointer; flex: none;
+}
+.xp-tab-close:hover { background: var(--contrast); color: var(--bright); }
+
+/* ---- the editor (textarea + line-number gutter) ---- */
+.xp-editor-wrap { flex: 1 1 auto; display: none; min-height: 0; overflow: hidden; }
+.xp-gutter, .xp-editor {
+  font-family: Consolas, "Courier New", Menlo, Monaco, "Droid Sans Mono", monospace;
+  font-size: 13px; line-height: 1.5; padding-top: 8px; padding-bottom: 8px;
+  border: none; margin: 0;
+}
+.xp-gutter {
+  flex: 0 0 auto; text-align: right; padding-left: 12px; padding-right: 10px;
+  color: var(--muted); background: var(--bg); white-space: pre; overflow: hidden;
+  user-select: none; tab-size: 2; font-variant-numeric: tabular-nums;
+}
+.xp-editor {
+  flex: 1 1 auto; resize: none; outline: none; padding-left: 8px; padding-right: 16px;
+  background: var(--bg); color: var(--text); white-space: pre; overflow: auto;
+  tab-size: 2; caret-color: var(--text);
+}
+
+/* ---- empty state ---- */
+.xp-empty {
+  flex: 1 1 auto; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 6px; color: var(--muted); text-align: center;
+}
+.xp-empty-logo { color: var(--border-2); }
+.xp-empty-lead { font-size: 15px; color: var(--text); margin: 8px 0 0; }
+.xp-empty-sub { font-size: 13px; margin: 0; }
+.xp-empty kbd {
+  font-family: inherit; font-size: 11px; background: var(--panel-2);
+  border: 1px solid var(--border-2); border-radius: 3px; padding: 1px 5px;
+}
+
+/* ---- status bar ---- */
+#xp-statusbar {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 22px; padding: 0 12px; flex: 0 0 auto;
+  background: var(--accent); color: #fff; font-size: 12px; user-select: none;
+}
+.xp-status-path { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.xp-status-right { display: flex; gap: 14px; flex: none; font-variant-numeric: tabular-nums; }
+
+/* ---- transient toast ---- */
+#xp-flash {
+  position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%);
+  background: var(--panel); color: var(--text); border: 1px solid var(--contrast);
+  border-radius: var(--radius-sm); padding: 7px 14px; font-size: 13px;
+  opacity: 0; pointer-events: none; transition: opacity .15s ease; z-index: 50;
+  box-shadow: 0 4px 16px rgba(0,0,0,.4);
+}
+#xp-flash.show { opacity: 1; }
