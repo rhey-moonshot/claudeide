@@ -120,6 +120,11 @@ html, body {
   font-size: 14px;
   line-height: 1.4;
   overflow: hidden;
+  /* Match VSCode's lighter text rendering. Without this, Chromium uses subpixel
+     (ClearType-like) smoothing that makes the same font look heavier/bolder than
+     VSCode — most visible in the terminal. Grayscale AA matches VSCode's weight. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body { display: flex; flex-direction: column; }
@@ -708,6 +713,8 @@ body.zen #statusbar { display: none; }   /* chrome melts away in focus mode */
 
 .pane-body { flex: 1; min-height: 0; position: relative; }
 .pane-body .xterm { height: 100%; padding: 4px 6px; }
+/* Ensure the terminal renders with grayscale AA like VSCode (lighter weight). */
+.xterm, .xterm .xterm-rows { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
 /* ---- scrollbars (VSCode overlay style) ----
    Gutter is reclaimed; a translucent thumb hints on hover, never reserving
