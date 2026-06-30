@@ -165,9 +165,12 @@ function resolveTarget(target, cwd) {
     if (kind === 'local') {
       return { file: 'powershell.exe', args: ['-NoLogo'], cwd: winCwd, env: { ...process.env }, warning: null };
     }
-    // default: drop into the default WSL distro. `--cd` accepts a Windows OR
-    // Linux path; the process itself launches from the Windows home.
+    // default: drop into a WSL distro. `-d <name>` selects the specific distro
+    // chosen in the workspace (falling back to the system default when unset);
+    // `--cd` accepts a Windows OR Linux path; the process launches from the
+    // Windows home.
     const args = [];
+    if (target && target.distro) args.push('-d', target.distro);
     const want = (cwd || '').trim();
     if (want) args.push('--cd', want);
     return { file: 'wsl.exe', args, cwd: winHome, env: { ...process.env, TERM: 'xterm-256color' }, warning: null };
@@ -203,6 +206,26 @@ function resolveTarget(target, cwd) {
   };
 }
 
+// Parse `wsl.exe -l -v` into { distros:[names], default:name }. The first line
+// is a (localized) header; the default distro is marked with a leading '*',
+// which isn't localized. Null bytes are stripped in case an old wsl.exe ignored
+// WSL_UTF8 and emitted UTF-16LE.
+function parseWslList(out) {
+  const text = String(out || "").replace(/\u0000/g, "").replace(/\r/g, "");
+  const lines = text.split('\n').filter((l) => l.trim().length);
+  const distros = [];
+  let dflt = '';
+  for (let i = 1; i < lines.length; i++) {          // skip header row
+    const stripped = lines[i].replace(/^\s+/, '');
+    const isDefault = stripped.startsWith('*');
+    const name = stripped.replace(/^\*\s*/, '').split(/\s+/)[0];
+    if (!name) continue;
+    distros.push(name);
+    if (isDefault) dflt = name;
+  }
+  return { distros, default: dflt };
+}
+
 // POSIX dirname for the remote (wsl/ssh) listings below, which speak Linux
 // paths regardless of the host. Returns null for the filesystem root.
 function posixParent(p) {
@@ -213,11 +236,13 @@ function posixParent(p) {
   return i === 0 ? '/' : s.slice(0, i);
 }
 
-// Browse a directory that the local Node fs can't see: the WSL distro's own
-// tree (from a native Windows build) or an ssh host. Runs a small POSIX script
-// over wsl.exe / ssh and parses its output into the same shape the native
-// lister returns ({ path, parent, entries }), or null if it couldn't be reached.
-function listDirViaShell(mode, host, startDir) {
+// Browse a directory that the local Node fs can't see: a WSL distro's own tree
+// (from a native Windows build) or an ssh host. Runs a small POSIX script over
+// wsl.exe / ssh and parses its output into the same shape the native lister
+// returns ({ path, parent, entries }), or null if it couldn't be reached.
+// `hostOrDistro` is the ssh host (mode 'ssh') or the WSL distro name (mode
+// 'wsl'); empty for wsl means the default distro.
+function listDirViaShell(mode, hostOrDistro, startDir) {
   return new Promise((resolve) => {
     const dir = (startDir == null ? '' : String(startDir)).replace(/'/g, `'\\''`);
     // cd into the requested dir (or $HOME when empty/gone), print the resolved
@@ -232,16 +257,17 @@ function listDirViaShell(mode, host, startDir) {
       file = IS_WIN ? 'ssh.exe' : 'ssh';
       // Single remote-command arg: ssh hands it to the login shell verbatim.
       // BatchMode/ConnectTimeout keep a bad host from hanging on a prompt.
-      args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', host, script];
-    } else { // 'wsl' — default distro on a native Windows host
+      args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', hostOrDistro, script];
+    } else { // 'wsl' — a specific distro (or the default when none given)
       file = 'wsl.exe';
-      args = ['sh', '-c', script];
+      args = hostOrDistro ? ['-d', hostOrDistro, 'sh', '-c', script] : ['sh', '-c', script];
       opts.env = { ...process.env, WSL_UTF8: '1' };  // make wsl.exe emit UTF-8, not UTF-16
     }
 
     execFile(file, args, opts, (_err, stdout) => {
-      const raw = String(stdout || '').replace(/\r/g, '').split('\n');
-      const i = raw.findIndex((l) => l.startsWith('/'));   // pwd is the first absolute line
+      // The \u0000 strip recovers ASCII names if an old wsl.exe ignored
+      // WSL_UTF8 and emitted UTF-16LE (paths/names are ASCII anyway).
+      const raw = String(stdout || "").replace(/\u0000/g, "").replace(/\r/g, "").split("\n");
       if (i < 0) { resolve(null); return; }                 // unreachable / errored
       const resolved = raw[i];
       const entries = raw.slice(i + 1).filter((l) => l.length > 0);
@@ -470,17 +496,47 @@ function registerIpc() {
     } catch (_) { return false; }
   });
 
-  // Folder picker backend. The native GTK dialog can't be themed under WSLg/
-  // Linux (it ignores nativeTheme), so the renderer draws its own VSCode-dark
-  // browser and asks us to list directories for it. Returns the resolved path,
-  // its navigable parent, and immediate subdirectories (dotfiles hidden).
-  // Reachability check for the workspace wizard's "Connect" step. Only SSH dials
-  // out; wsl/local are local and always pass. We use BatchMode so the probe can
-  // never hang on a password prompt, and treat an auth/host-key failure as
-  // "reachable" — the real PTY session is interactive and will prompt for those.
+  // Enumerate WSL distros for the workspace wizard so the user can pick the
+  // right one (the system "default" often isn't where their files live). Empty
+  // off Windows — there the "wsl" connection just means this machine.
+  ipcMain.handle('wsl:list', async () => {
+    if (!IS_WIN) return { distros: [], default: '' };
+    return await new Promise((resolve) => {
+      execFile('wsl.exe', ['-l', '-v'],
+        { timeout: 10000, windowsHide: true, env: { ...process.env, WSL_UTF8: '1' } },
+        (err, out) => resolve(err ? { distros: [], default: '' } : parseWslList(out)));
+    });
+  });
+
+  // Reachability check for the workspace wizard's "Connect" step.
+  //  - ssh: dial the host (BatchMode so it can't hang on a password prompt; an
+  //    auth/host-key failure still counts as "reachable" since the real PTY
+  //    session is interactive and will prompt for those).
+  //  - wsl on Windows: run a probe inside the chosen distro so a missing/wrong
+  //    distro is caught here instead of yielding an empty folder browse.
+  //  - everything else is local and always passes.
   ipcMain.handle('conn:test', async (_e, target) => {
     const kind = target && target.kind;
     const host = target && target.host;
+
+    if (kind === 'wsl' && IS_WIN) {
+      const distro = (target && target.distro) || '';
+      return await new Promise((resolve) => {
+        const args = distro ? ['-d', distro, 'sh', '-c', 'echo HYDRA_OK'] : ['sh', '-c', 'echo HYDRA_OK'];
+        execFile('wsl.exe', args,
+          { timeout: 12000, windowsHide: true, env: { ...process.env, WSL_UTF8: '1' } },
+          (err, out, stderr) => {
+            const text = String(out || "").replace(/\u0000/g, "");
+            if (!err && text.includes('HYDRA_OK')) {
+              resolve({ ok: true, note: `Connected to ${distro || 'the default distro'}.` });
+              return;
+            }
+            const line = String(stderr || "").replace(/\u0000/g, "").trim().split("\n").pop();
+            resolve({ ok: false, error: line || (err && err.message) || 'WSL distro not reachable' });
+          });
+      });
+    }
+
     if (kind !== 'ssh') return { ok: true };
     if (!host) return { ok: false, error: 'No SSH host given' };
     return await new Promise((resolve) => {
@@ -502,6 +558,10 @@ function registerIpc() {
     });
   });
 
+  // Folder picker backend. The native GTK dialog can't be themed under WSLg/
+  // Linux (it ignores nativeTheme), so the renderer draws its own VSCode-dark
+  // browser and asks us to list directories for it. Returns the resolved path,
+  // its navigable parent, and immediate subdirectories (dotfiles hidden).
   ipcMain.handle('fs:listDir', async (_e, arg) => {
     // Back-compat: `arg` is either a bare path string (local browse) or a
     // { path, target } payload that names the connection to browse.
@@ -521,8 +581,12 @@ function registerIpc() {
       // they were the remote's is worse than an honest empty listing.
       return r || { path: (startPath && String(startPath).trim()) || '~', parent: null, entries: [], unreachable: true };
     } else if (kind === 'wsl' && IS_WIN) {
-      const r = await listDirViaShell('wsl', '', startPath);
+      const distro = (payload.target && payload.target.distro) || '';
+      const r = await listDirViaShell('wsl', distro, startPath);
+      // A specific distro that won't answer shouldn't masquerade as the Windows
+      // fs; only an unspecified (default) distro falls through to local.
       if (r) return r;
+      if (distro) return { path: (startPath && String(startPath).trim()) || '~', parent: null, entries: [], unreachable: true };
     }
 
     // Native (local) listing. On a WSL host the `local` (Windows) connection is

@@ -1325,6 +1325,7 @@ function askWorkspace(title, initial = {}) {
           <input class="modal-input ws-name" type="text" spellcheck="false" placeholder="e.g. backend" />
           <label class="modal-label">Connection</label>
           <div class="conn-options"></div>
+          <select class="modal-input ws-distro" style="display:none; margin-top:6px;"></select>
           <input class="modal-input ws-ssh" type="text" spellcheck="false" placeholder="user@hostname" style="display:none; margin-top:6px;" />
           <div class="ws-status" style="display:none;"></div>
           <div class="modal-actions">
@@ -1356,6 +1357,7 @@ function askWorkspace(title, initial = {}) {
     const nameEl = overlay.querySelector('.ws-name');
     const dirEl = overlay.querySelector('.ws-dir');
     const sshEl = overlay.querySelector('.ws-ssh');
+    const distroEl = overlay.querySelector('.ws-distro');
     const optsEl = overlay.querySelector('.conn-options');
     const statusEl = overlay.querySelector('.ws-status');
     const summaryEl = overlay.querySelector('.ws-conn-summary');
@@ -1382,6 +1384,40 @@ function askWorkspace(title, initial = {}) {
     choices.push({ kind: 'ssh', icon: ICO_SSH, name: 'Connect via SSH', sub: 'A remote host over ssh' });
     const choiceOf = (k) => choices.find((c) => c.kind === k) || choices[0];
 
+    // WSL distro picker (Windows only): the system "default" distro often isn't
+    // the one with the user's files, so let them choose which to connect to.
+    let wslDistros = [];
+    let wslDefault = '';
+    const wantDistro = (initial.target && initial.target.kind === 'wsl' && initial.target.distro) || '';
+    function hasDistroPicker() { return env.isWin && wslDistros.length > 0; }
+    function populateDistro() {
+      distroEl.innerHTML = '';
+      for (const d of wslDistros) {
+        const o = document.createElement('option');
+        o.value = d;
+        o.textContent = d + (d === wslDefault ? ' (default)' : '');
+        distroEl.appendChild(o);
+      }
+      // Prefer the workspace's saved distro, else the system default, else first.
+      distroEl.value = (wantDistro && wslDistros.includes(wantDistro)) ? wantDistro
+        : (wslDefault && wslDistros.includes(wslDefault)) ? wslDefault
+        : (wslDistros[0] || '');
+      syncExtras();
+    }
+    if (env.isWin && window.hydra.wslList) {
+      window.hydra.wslList().then((r) => {
+        wslDistros = (r && r.distros) || [];
+        wslDefault = (r && r.default) || '';
+        populateDistro();
+      }).catch(() => {});
+    }
+
+    // Show the SSH host / WSL distro input that matches the selected connection.
+    function syncExtras() {
+      sshEl.style.display = sel === 'ssh' ? '' : 'none';
+      distroEl.style.display = (sel === 'wsl' && hasDistroPicker()) ? '' : 'none';
+    }
+
     function paint() {
       optsEl.innerHTML = '';
       for (const c of choices) {
@@ -1395,14 +1431,13 @@ function askWorkspace(title, initial = {}) {
         if (c.kind === sel) row.querySelector('.remote-item-tag').textContent = '✓';
         row.addEventListener('click', () => {
           sel = c.kind;
-          sshEl.style.display = sel === 'ssh' ? '' : 'none';
           clearStatus();
           paint();
           if (sel === 'ssh') sshEl.focus();
         });
         optsEl.appendChild(row);
       }
-      sshEl.style.display = sel === 'ssh' ? '' : 'none';
+      syncExtras();
     }
 
     const done = (val) => { overlay.remove(); resolve(val); };
@@ -1424,12 +1459,15 @@ function askWorkspace(title, initial = {}) {
       const c = choiceOf(sel);
       summaryEl.innerHTML = c.icon + `<span class="ws-conn-summary-text"></span>`;
       summaryEl.querySelector('.ws-conn-summary-text').textContent =
-        sel === 'ssh' ? `SSH · ${committed.host}` : `${c.name} · ${c.sub}`;
+        sel === 'ssh' ? `SSH · ${committed.host}`
+        : (sel === 'wsl' && committed.distro) ? `WSL · ${committed.distro}`
+        : `${c.name} · ${c.sub}`;
       dirEl.focus();
     }
 
-    // Step 1 → step 2: validate, and for SSH verify the host is reachable before
-    // moving on (so Browse on step 2 actually has a filesystem to list).
+    // Step 1 → step 2: validate, then verify the connection is reachable before
+    // moving on (SSH host / WSL distro) so Browse on step 2 has a real
+    // filesystem to list. wsl/local on this machine pass instantly.
     async function goNext() {
       if (nextBtn.disabled) return;
       const name = (nameEl.value || '').trim();
@@ -1437,10 +1475,15 @@ function askWorkspace(title, initial = {}) {
       const host = (sshEl.value || '').trim();
       if (sel === 'ssh' && !host) { sshEl.focus(); setStatus('Enter an SSH host (user@hostname).', 'error'); return; }
       const target = { kind: sel, host: sel === 'ssh' ? host : '' };
+      if (sel === 'wsl' && hasDistroPicker()) target.distro = distroEl.value || '';
 
-      if (sel === 'ssh') {
+      // Verify the ones that actually reach off this process: ssh always, and
+      // wsl on Windows (a specific distro can be stopped/uninstalled).
+      const verify = sel === 'ssh' || (sel === 'wsl' && env.isWin);
+      if (verify) {
+        const label = sel === 'ssh' ? host : (target.distro || 'default distro');
         nextBtn.disabled = true;
-        setStatus(`Connecting to ${host}…`, 'busy');
+        setStatus(`Connecting to ${label}…`, 'busy');
         const res = await window.hydra.testConn(target);
         nextBtn.disabled = false;
         if (!res || !res.ok) {
