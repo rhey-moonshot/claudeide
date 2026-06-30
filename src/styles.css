@@ -265,6 +265,21 @@ body { display: flex; flex-direction: column; }
 .modal-ok:hover { background: var(--btn-primary-hover) !important; }
 .modal-ok.danger { background: var(--error) !important; color: #2a0d0a !important; }
 
+/* ---- workspace chooser (pick which workspace to edit) ---- */
+.ws-choose-list { display: flex; flex-direction: column; gap: 2px; max-height: 46vh; overflow-y: auto; margin-top: 4px; }
+.ws-choose-row {
+  display: flex; align-items: center; gap: 8px; text-align: left; width: 100%;
+  background: var(--input); color: var(--text); border: 1px solid transparent;
+  border-radius: var(--radius-sm); padding: 8px 10px; cursor: pointer; font-size: 14px;
+}
+.ws-choose-row:hover { background: var(--btn-hover); color: var(--bright); }
+.ws-choose-row.active { border-color: var(--contrast); }
+.ws-choose-row:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 1px var(--focus); }
+.ws-choose-main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ws-choose-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-choose-path { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-choose-tag { font-size: 12px; color: var(--ready); flex: none; }
+
 /* ---- workspace wizard (two-step: connection, then directory) ---- */
 .modal-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .ws-step-badge { font-size: 12px; font-weight: 400; color: var(--muted); }

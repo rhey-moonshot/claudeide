@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('hydra', {
   resize: (id, cols, rows) => ipcRenderer.send('pty:resize', { id, cols, rows }),
   kill: (id) => ipcRenderer.send('pty:kill', { id }),
   envInfo: () => ipcRenderer.invoke('env:info'),
+  newWindow: () => ipcRenderer.invoke('window:new'),
   notify: (payload) => ipcRenderer.invoke('notify', payload),
   loadState: () => ipcRenderer.invoke('state:load'),
   saveState: (state) => ipcRenderer.invoke('state:save', state),

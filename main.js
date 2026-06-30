@@ -359,9 +359,21 @@ function gitInfo(dir) {
   });
 }
 
+// A "New Window" launches a second copy of the app with --hydra-blank. Because
+// all windows would otherwise share one workspace.json (the app is built around
+// a single window + state file), a blank instance persists to its OWN per-pid
+// file so it starts empty and never clobbers the user's real workspaces. The
+// file is ephemeral — removed on quit (see app.on('will-quit')).
+const IS_BLANK_INSTANCE = process.argv.includes('--hydra-blank');
+
 // Workspace state (pane layout + labels + toolbar) lives in userData.
-function statePath() {
+function primaryStatePath() {
   return path.join(app.getPath('userData'), 'workspace.json');
+}
+function statePath() {
+  return IS_BLANK_INSTANCE
+    ? path.join(app.getPath('userData'), `workspace-blank-${process.pid}.json`)
+    : primaryStatePath();
 }
 
 // Pre-paint window background + native-chrome mode per color theme, so launching
@@ -376,7 +388,9 @@ const THEME_CHROME = {
 };
 function savedTheme() {
   try {
-    const id = JSON.parse(fs.readFileSync(statePath(), 'utf8')).theme;
+    // Theme is a global preference — always read it from the primary state so a
+    // blank instance opens in the same theme instead of flashing the default.
+    const id = JSON.parse(fs.readFileSync(primaryStatePath(), 'utf8')).theme;
     return THEME_CHROME[id] ? id : 'dark';
   } catch (_) { return 'dark'; }
 }
@@ -386,6 +400,9 @@ function registerIpc() {
   ipcReady = true;
 
   ipcMain.handle('pty:create', (_e, args) => createPty(args));
+
+  // File → New Window: open a fresh, blank instance of the app.
+  ipcMain.handle('window:new', () => { spawnNewInstance(); return true; });
 
   // Keep native chrome (menus, scrollbars, dialogs) in step with the in-app theme.
   ipcMain.on('theme:native', (_e, mode) => {
@@ -627,6 +644,20 @@ function registerIpc() {
 
 const ICON_PATH = path.join(__dirname, 'assets', 'icon.png');
 
+// Launch a brand-new, blank instance of the app as its own process (File → New
+// Window). A separate process — not a second BrowserWindow — because the app's
+// IPC/state assume a single window per process; this keeps the new window fully
+// independent (its own PTYs, its own ephemeral state).
+function spawnNewInstance() {
+  // dev (`electron .`): argv[1] is the app dir and must be re-passed; packaged:
+  // execPath is the app binary, so just the flag.
+  const args = process.defaultApp ? [path.resolve(process.argv[1]), '--hydra-blank'] : ['--hydra-blank'];
+  try {
+    const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore' });
+    child.unref();
+  } catch (_) { /* if it can't spawn, nothing happens — no crash */ }
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1600,
@@ -700,6 +731,14 @@ function buildAppMenu() {
 
   return Menu.buildFromTemplate([
     {
+      label: 'File',
+      submenu: [
+        { label: 'New Window', accelerator: 'CommandOrControl+Shift+N', click: () => spawnNewInstance() },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
       label: 'View',
       submenu: [
         { role: 'reload' }, { role: 'forceReload' },
@@ -736,6 +775,12 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+// A blank instance's per-pid state file is ephemeral — clean it up on exit so
+// userData doesn't fill with stale workspace-blank-*.json files.
+app.on('will-quit', () => {
+  if (IS_BLANK_INSTANCE) { try { fs.unlinkSync(statePath()); } catch (_) {} }
 });
 
 app.on('window-all-closed', () => {

@@ -917,31 +917,108 @@ async function newWorkspace() {
   flash(dir ? `created: ${name} → ${dir}` : `created: ${name}`);
 }
 
-// Edit the active tab's workspace: name, working dir, and connection. The new
-// connection applies to NEW panes; terminals already running keep their shell.
-async function editWorkspace(id) {
-  const t = store.tabs[id];
-  if (!t) return;
-  const res = await askWorkspace('Edit workspace', {
-    name: t.name,
-    dir: (id === store.active ? cwdInput() : (t.toolbar && t.toolbar.cwd)) || '',
-    target: workspaceTarget(id),
-    okLabel: 'Save',
-  });
+// Edit Workspace from the File menu: let the user choose WHICH workspace to
+// edit (don't assume the active tab). With one workspace, skip the chooser.
+async function editWorkspace() {
+  const names = Array.from(new Set([
+    ...Object.keys(store.recents),
+    ...store.open.map((id) => store.tabs[id] && store.tabs[id].name).filter(Boolean),
+  ])).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  if (!names.length) { flash('no workspaces to edit'); return; }
+  const activeName = store.tabs[store.active] && store.tabs[store.active].name;
+  const name = names.length === 1 ? names[0] : await chooseWorkspace('Edit workspace', names, activeName);
+  if (!name) return;
+  await editWorkspaceNamed(name);
+}
+
+// The bottom-left connection pill edits the ACTIVE workspace directly (its whole
+// point is "this tab's connection"), so it bypasses the chooser.
+function editActiveWorkspace() {
+  const t = store.tabs[store.active];
+  if (!t) { flash('no active workspace'); return; }
+  editWorkspaceNamed(t.name);
+}
+
+// Edit a workspace by name: its name, working dir, and connection. Updates the
+// saved definition AND every open tab of that workspace. A new connection
+// applies to NEW panes; terminals already running keep their shell.
+async function editWorkspaceNamed(name) {
+  const openIds = store.open.filter((id) => store.tabs[id] && store.tabs[id].name === name);
+  // Source the live definition from an open tab if there is one (prefer the
+  // active tab), else from the saved recents entry.
+  const srcTab = openIds.includes(store.active) ? store.active : openIds[0];
+  const rec = store.recents[name];
+  const baseToolbar = (srcTab && store.tabs[srcTab].toolbar) || (rec && rec.toolbar) || defaultToolbar();
+  const curDir = ((srcTab === store.active) ? cwdInput() : baseToolbar.cwd) || '';
+  const curTarget = (baseToolbar.target && baseToolbar.target.kind) ? baseToolbar.target : defaultRemote();
+
+  const res = await askWorkspace('Edit workspace', { name, dir: curDir, target: curTarget, okLabel: 'Save' });
   if (!res) return;
-  const { name, dir, target } = res;
-  const prev = workspaceTarget(id);
-  const connChanged = JSON.stringify(prev) !== JSON.stringify(target);
+  const { name: newName, dir, target } = res;
+  const connChanged = JSON.stringify(curTarget) !== JSON.stringify(target);
+  const renamed = newName !== name;
 
-  // Apply working dir + connection to the tab (and the active toolbar inputs).
-  t.toolbar = { ...(t.toolbar || defaultToolbar()), cwd: dir || '', target };
-  if (id === store.active) { document.getElementById('cwd').value = dir || ''; renderRemote(); }
-  store.recents[name] = { toolbar: t.toolbar };
-  if (name !== t.name) renameTab(id, name);    // also re-points recents + tab UI
-  else { renderTabs(); saveState(); }
+  // Saved definition under the (possibly new) name; drop the old key on rename.
+  const savedToolbar = { ...((rec && rec.toolbar) || baseToolbar), cwd: dir || '', target };
+  if (renamed && rec) delete store.recents[name];
+  store.recents[newName] = { toolbar: savedToolbar };
 
-  const note = (connChanged && panesOf(id).length) ? ' — new connection applies to new panes' : '';
-  flash(`updated: ${name}${note}`);
+  // Apply to every open tab of this workspace.
+  for (const id of openIds) {
+    store.tabs[id].toolbar = { ...store.tabs[id].toolbar, cwd: dir || '', target };
+    if (renamed) {
+      store.tabs[id].name = newName;
+      for (const p of panesOf(id)) p.wsName = newName;
+    }
+  }
+  // Reflect dir/connection in the toolbar inputs if the active tab was edited.
+  if (openIds.includes(store.active)) { document.getElementById('cwd').value = dir || ''; renderRemote(); }
+
+  renderTabs();
+  saveState();
+  const note = (connChanged && openIds.length) ? ' — new connection applies to new panes' : '';
+  flash(`updated: ${newName}${note}`);
+}
+
+// Small modal to choose a workspace by name (for Edit Workspace). Resolves to
+// the chosen name or null. The active workspace is preselected for quick Enter.
+function chooseWorkspace(title, names, activeName) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal ws-choose">
+        <div class="modal-title"></div>
+        <div class="ws-choose-list"></div>
+        <div class="modal-actions"><button class="modal-cancel">Cancel</button></div>
+      </div>`;
+    overlay.querySelector('.modal-title').textContent = title;
+    const listEl = overlay.querySelector('.ws-choose-list');
+    const done = (v) => { overlay.remove(); resolve(v); };
+    for (const nm of names) {
+      const rec = store.recents[nm];
+      const cwd = (rec && rec.toolbar && rec.toolbar.cwd) || '';
+      const openCount = store.open.filter((id) => store.tabs[id] && store.tabs[id].name === nm).length;
+      const row = document.createElement('button');
+      row.className = 'ws-choose-row' + (nm === activeName ? ' active' : '');
+      row.innerHTML = `<span class="ws-choose-main"><span class="ws-choose-name"></span><span class="ws-choose-path"></span></span><span class="ws-choose-tag"></span>`;
+      row.querySelector('.ws-choose-name').textContent = nm;
+      row.querySelector('.ws-choose-path').textContent = cwd || env.home || '~';
+      if (openCount) row.querySelector('.ws-choose-tag').textContent = `${openCount} open`;
+      row.addEventListener('click', () => done(nm));
+      listEl.appendChild(row);
+    }
+    overlay.querySelector('.modal-cancel').onclick = () => done(null);
+    overlay.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') { e.preventDefault(); done(null); }
+      if (e.key === 'Enter') { e.preventDefault(); const f = listEl.querySelector('.ws-choose-row:focus') || listEl.querySelector('.ws-choose-row.active'); if (f) f.click(); }
+    });
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(null); });
+    document.body.appendChild(overlay);
+    const act = listEl.querySelector('.ws-choose-row.active') || listEl.firstChild;
+    if (act && act.focus) act.focus();
+  });
 }
 
 // Open a known workspace from the recents list — ALWAYS in a new tab, so opening
@@ -1089,9 +1166,11 @@ function showFileMenu(anchor) {
   fileMenuEl = menu;
 
   const items = [
+    { label: 'New Window', hint: 'Ctrl+Shift+N', run: () => window.hydra.newWindow() },
+    { sep: true },
     { label: 'New Workspace…', run: () => newWorkspace() },
     { label: 'Open Workspace…', run: () => showWorkspaceMenu(anchor) },
-    { label: 'Edit Workspace…', run: () => editWorkspace(store.active) },
+    { label: 'Edit Workspace…', run: () => editWorkspace() },
     { sep: true },
     { label: 'Color Theme…', run: () => showThemeMenu(anchor) },
     { sep: true },
@@ -1879,7 +1958,7 @@ document.getElementById('file-menu').addEventListener('click', (e) => {
 document.getElementById('jump-attn').addEventListener('click', jumpToAttention);
 document.getElementById('remote-indicator').addEventListener('click', (e) => {
   e.stopPropagation();
-  editWorkspace(store.active);   // connection lives on the workspace now
+  editActiveWorkspace();   // the pill edits THIS tab's workspace connection
 });
 document.getElementById('zen-exit').addEventListener('click', exitZen);
 
