@@ -296,7 +296,9 @@ function createPane(opts = {}) {
 
   const term = new Terminal({
     theme: xtermTheme(themeId),
-    fontFamily: 'ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace',
+    // Match VSCode's default terminal font per platform: Consolas (Windows),
+    // Menlo (macOS), Droid Sans Mono (Linux), with a generic fallback.
+    fontFamily: 'Consolas, "Courier New", Menlo, Monaco, "Droid Sans Mono", monospace',
     fontSize: 14,            // VSCode's default terminal/editor font size
     cursorBlink: true,
     scrollback: 5000,
@@ -1920,7 +1922,9 @@ function createFrontMirror(paneId) {
 
   const term = new Terminal({
     theme: xtermTheme(themeId),
-    fontFamily: 'ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace',
+    // Match VSCode's default terminal font per platform: Consolas (Windows),
+    // Menlo (macOS), Droid Sans Mono (Linux), with a generic fallback.
+    fontFamily: 'Consolas, "Courier New", Menlo, Monaco, "Droid Sans Mono", monospace',
     fontSize: 14, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
   });
   const fit = new FitAddon.FitAddon();
