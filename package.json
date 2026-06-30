@@ -1,7 +1,7 @@
 {
   "name": "claudeide",
   "productName": "ClaudeIDE",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "A terminal-grid editor for running many Claude Code CLI sessions at once.",
   "main": "main.js",
   "scripts": {
