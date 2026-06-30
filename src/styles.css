@@ -265,6 +265,27 @@ body { display: flex; flex-direction: column; }
 .modal-ok:hover { background: var(--btn-primary-hover) !important; }
 .modal-ok.danger { background: var(--error) !important; color: #2a0d0a !important; }
 
+/* ---- workspace wizard (two-step: connection, then directory) ---- */
+.modal-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ws-step-badge { font-size: 12px; font-weight: 400; color: var(--muted); }
+.ws-status {
+  margin-top: 12px; font-size: 13px; line-height: 1.4;
+  border-radius: var(--radius-sm); padding: 7px 10px; background: var(--input);
+  border: 1px solid var(--border-2); color: var(--muted);
+}
+.ws-status-busy { color: var(--muted); }
+.ws-status-error { color: var(--error); border-color: var(--error); }
+.ws-status-ok { color: var(--ready); border-color: var(--ready); }
+.ws-conn-summary {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text);
+  background: var(--input); border: 1px solid var(--contrast);
+  border-radius: var(--radius-sm); padding: 8px 10px; margin-bottom: 4px;
+}
+.ws-conn-summary .remote-item-ico { width: 15px; height: 15px; flex: none; color: var(--remote); }
+.ws-conn-summary-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modal-actions { align-items: center; }
+.modal-actions .ws-back { margin-right: auto; }   /* push Back left, finish stays right */
+
 /* ---- in-app folder picker (themed; replaces native GTK dialog) ---- */
 .dir-picker { width: 520px; }
 .dir-path {

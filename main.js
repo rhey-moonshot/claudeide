@@ -203,6 +203,53 @@ function resolveTarget(target, cwd) {
   };
 }
 
+// POSIX dirname for the remote (wsl/ssh) listings below, which speak Linux
+// paths regardless of the host. Returns null for the filesystem root.
+function posixParent(p) {
+  const s = String(p || '').replace(/\/+$/, '');
+  if (!s) return null;                      // was '/' (or empty) -> no parent
+  const i = s.lastIndexOf('/');
+  if (i < 0) return null;
+  return i === 0 ? '/' : s.slice(0, i);
+}
+
+// Browse a directory that the local Node fs can't see: the WSL distro's own
+// tree (from a native Windows build) or an ssh host. Runs a small POSIX script
+// over wsl.exe / ssh and parses its output into the same shape the native
+// lister returns ({ path, parent, entries }), or null if it couldn't be reached.
+function listDirViaShell(mode, host, startDir) {
+  return new Promise((resolve) => {
+    const dir = (startDir == null ? '' : String(startDir)).replace(/'/g, `'\\''`);
+    // cd into the requested dir (or $HOME when empty/gone), print the resolved
+    // path, then each non-hidden subdirectory, one per line, case-insensitive.
+    const script =
+      `d='${dir}'; if [ -n "$d" ] && [ -d "$d" ]; then cd "$d"; else cd "$HOME" 2>/dev/null || cd /; fi; ` +
+      `pwd; ` +
+      `for f in */; do n="\${f%/}"; [ "$n" = '*' ] && continue; printf '%s\\n' "$n"; done | LC_ALL=C sort -f`;
+
+    let file, args, opts = { timeout: 8000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 };
+    if (mode === 'ssh') {
+      file = IS_WIN ? 'ssh.exe' : 'ssh';
+      // Single remote-command arg: ssh hands it to the login shell verbatim.
+      // BatchMode/ConnectTimeout keep a bad host from hanging on a prompt.
+      args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', host, script];
+    } else { // 'wsl' — default distro on a native Windows host
+      file = 'wsl.exe';
+      args = ['sh', '-c', script];
+      opts.env = { ...process.env, WSL_UTF8: '1' };  // make wsl.exe emit UTF-8, not UTF-16
+    }
+
+    execFile(file, args, opts, (_err, stdout) => {
+      const raw = String(stdout || '').replace(/\r/g, '').split('\n');
+      const i = raw.findIndex((l) => l.startsWith('/'));   // pwd is the first absolute line
+      if (i < 0) { resolve(null); return; }                 // unreachable / errored
+      const resolved = raw[i];
+      const entries = raw.slice(i + 1).filter((l) => l.length > 0);
+      resolve({ path: resolved, parent: posixParent(resolved), entries });
+    });
+  });
+}
+
 function createPty({ id, cols, rows, cwd, target }) {
   const want = normalizeCwd(cwd);
   const spec = resolveTarget(target, cwd);
@@ -427,11 +474,64 @@ function registerIpc() {
   // Linux (it ignores nativeTheme), so the renderer draws its own VSCode-dark
   // browser and asks us to list directories for it. Returns the resolved path,
   // its navigable parent, and immediate subdirectories (dotfiles hidden).
-  ipcMain.handle('fs:listDir', async (_e, target) => {
-    let dir = target && String(target).trim() ? normalizeCwd(target) : os.homedir();
+  // Reachability check for the workspace wizard's "Connect" step. Only SSH dials
+  // out; wsl/local are local and always pass. We use BatchMode so the probe can
+  // never hang on a password prompt, and treat an auth/host-key failure as
+  // "reachable" — the real PTY session is interactive and will prompt for those.
+  ipcMain.handle('conn:test', async (_e, target) => {
+    const kind = target && target.kind;
+    const host = target && target.host;
+    if (kind !== 'ssh') return { ok: true };
+    if (!host) return { ok: false, error: 'No SSH host given' };
+    return await new Promise((resolve) => {
+      const file = IS_WIN ? 'ssh.exe' : 'ssh';
+      execFile(file,
+        ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=8', '-o', 'StrictHostKeyChecking=accept-new', host, 'true'],
+        { timeout: 14000, windowsHide: true },
+        (err, _out, stderr) => {
+          if (!err) { resolve({ ok: true }); return; }
+          const s = String(stderr || '').toLowerCase();
+          // Host answered but wants interactive auth / host-key trust — fine.
+          if (/permission denied|authentication|host key/.test(s)) {
+            resolve({ ok: true, note: 'Reachable — will prompt for sign-in when the pane opens.' });
+            return;
+          }
+          const line = String(stderr || err.message || '').trim().split('\n').pop();
+          resolve({ ok: false, error: line || 'connection failed' });
+        });
+    });
+  });
+
+  ipcMain.handle('fs:listDir', async (_e, arg) => {
+    // Back-compat: `arg` is either a bare path string (local browse) or a
+    // { path, target } payload that names the connection to browse.
+    const payload = (arg && typeof arg === 'object') ? arg : { path: arg, target: null };
+    const startPath = payload.path;
+    const kind = payload.target && payload.target.kind;
+    const host = payload.target && payload.target.host;
+
+    // Browse the connection's own filesystem when the local Node fs can't see it:
+    //  - ssh  -> always remote
+    //  - wsl on a native Windows host -> inside the distro (Linux paths)
+    // A native WSL/Linux host already IS the wsl filesystem, and `local` on
+    // Windows is the host fs, so both fall through to the native lister below.
+    if (kind === 'ssh' && host) {
+      const r = await listDirViaShell('ssh', host, startPath);
+      // Never fall back to the local fs for ssh — showing host folders as if
+      // they were the remote's is worse than an honest empty listing.
+      return r || { path: (startPath && String(startPath).trim()) || '~', parent: null, entries: [], unreachable: true };
+    } else if (kind === 'wsl' && IS_WIN) {
+      const r = await listDirViaShell('wsl', '', startPath);
+      if (r) return r;
+    }
+
+    // Native (local) listing. On a WSL host the `local` (Windows) connection is
+    // reached through the /mnt mounts, so default it to the Windows drive root.
+    const fallbackHome = (kind === 'local' && IS_WSL) ? '/mnt/c' : os.homedir();
+    let dir = startPath && String(startPath).trim() ? normalizeCwd(startPath) : fallbackHome;
     try {
-      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) dir = os.homedir();
-    } catch (_) { dir = os.homedir(); }
+      if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) dir = fallbackHome;
+    } catch (_) { dir = fallbackHome; }
     dir = path.resolve(dir);
 
     let entries = [];

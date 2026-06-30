@@ -13,7 +13,8 @@ contextBridge.exposeInMainWorld('hydra', {
   notify: (payload) => ipcRenderer.invoke('notify', payload),
   loadState: () => ipcRenderer.invoke('state:load'),
   saveState: (state) => ipcRenderer.invoke('state:save', state),
-  listDir: (target) => ipcRenderer.invoke('fs:listDir', target),
+  listDir: (arg) => ipcRenderer.invoke('fs:listDir', arg),
+  testConn: (target) => ipcRenderer.invoke('conn:test', target),
   // Resolve the absolute filesystem path of a dropped/pasted File. Uses the
   // modern webUtils API (File.path was removed in Electron 32); falls back to
   // the legacy property so older builds keep working.

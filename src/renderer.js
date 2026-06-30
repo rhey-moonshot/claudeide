@@ -645,12 +645,10 @@ function workspaceTarget(wsId) {
 //                                                  //   the Open menu (name + cwd/settings)
 // }
 function freshStore() {
-  const id = 't' + (++tabSeq);
-  return {
-    version: 4, active: id, open: [id],
-    tabs: { [id]: { name: 'default', toolbar: defaultToolbar(), panes: [] } },
-    recents: { default: { toolbar: defaultToolbar() } },
-  };
+  // A fresh install (or an emptied store) boots to the welcome screen — we don't
+  // auto-load any default workspace. This is the same empty state you reach by
+  // closing the last tab: no open tabs, no active tab, nothing in the registry.
+  return { version: 4, active: null, open: [], tabs: {}, recents: {} };
 }
 // Build a v4 store from the older "named workspace" shape.
 function tabsFromNamed(workspaces, openNames, activeName) {
@@ -1306,37 +1304,63 @@ function askConfirm({ title, message, confirmLabel = 'Confirm', danger = false }
   });
 }
 
-// Name + working-directory + connection prompt for a workspace. Used for both
+// Name + connection + working-directory prompt for a workspace. Used for both
 // "New workspace" and "Edit workspace". `initial` prefills the fields:
 //   { name, dir, target, okLabel }. Resolves to { name, dir, target } or null.
+//
+// Two-step wizard: pick the name + connection first (step 1), verify it can be
+// reached, THEN choose the working directory (step 2) — because "Browse" lists
+// the chosen connection's filesystem, so the connection must be settled first.
 function askWorkspace(title, initial = {}) {
   return new Promise((resolve) => {
+    const isEdit = !!initial.okLabel;            // Edit passes okLabel ('Save')
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
-      <div class="modal">
-        <div class="modal-title"></div>
-        <label class="modal-label">Name</label>
-        <input class="modal-input ws-name" type="text" spellcheck="false" placeholder="e.g. backend" />
-        <label class="modal-label">Working directory</label>
-        <div class="modal-row">
-          <input class="modal-input ws-dir" type="text" spellcheck="false" placeholder="default: home directory" />
-          <button class="modal-browse">Browse…</button>
+      <div class="modal ws-wizard">
+        <div class="modal-title"><span class="ws-title-text"></span><span class="ws-step-badge"></span></div>
+
+        <div class="ws-step ws-step-1">
+          <label class="modal-label">Name</label>
+          <input class="modal-input ws-name" type="text" spellcheck="false" placeholder="e.g. backend" />
+          <label class="modal-label">Connection</label>
+          <div class="conn-options"></div>
+          <input class="modal-input ws-ssh" type="text" spellcheck="false" placeholder="user@hostname" style="display:none; margin-top:6px;" />
+          <div class="ws-status" style="display:none;"></div>
+          <div class="modal-actions">
+            <button class="modal-cancel">Cancel</button>
+            <button class="modal-ok ws-next"></button>
+          </div>
         </div>
-        <label class="modal-label">Connection</label>
-        <div class="conn-options"></div>
-        <input class="modal-input ws-ssh" type="text" spellcheck="false" placeholder="user@hostname" style="display:none; margin-top:6px;" />
-        <div class="modal-actions">
-          <button class="modal-cancel">Cancel</button>
-          <button class="modal-ok"></button>
+
+        <div class="ws-step ws-step-2" style="display:none;">
+          <div class="ws-conn-summary"></div>
+          <label class="modal-label">Working directory</label>
+          <div class="modal-row">
+            <input class="modal-input ws-dir" type="text" spellcheck="false" placeholder="default: home directory" />
+            <button class="modal-browse">Browse…</button>
+          </div>
+          <div class="modal-actions">
+            <button class="ws-back">← Back</button>
+            <button class="modal-ok ws-finish"></button>
+          </div>
         </div>
       </div>`;
-    overlay.querySelector('.modal-title').textContent = title;
-    overlay.querySelector('.modal-ok').textContent = initial.okLabel || 'Create';
+    overlay.querySelector('.ws-title-text').textContent = title;
+    const stepBadge = overlay.querySelector('.ws-step-badge');
+    const nextBtn = overlay.querySelector('.ws-next');
+    const finishBtn = overlay.querySelector('.ws-finish');
+    nextBtn.textContent = isEdit ? 'Update →' : 'Connect →';
+    finishBtn.textContent = initial.okLabel || 'Create';
+
     const nameEl = overlay.querySelector('.ws-name');
     const dirEl = overlay.querySelector('.ws-dir');
     const sshEl = overlay.querySelector('.ws-ssh');
     const optsEl = overlay.querySelector('.conn-options');
+    const statusEl = overlay.querySelector('.ws-status');
+    const summaryEl = overlay.querySelector('.ws-conn-summary');
+    const step1El = overlay.querySelector('.ws-step-1');
+    const step2El = overlay.querySelector('.ws-step-2');
     nameEl.value = initial.name || '';
     dirEl.value = initial.dir || '';
 
@@ -1356,6 +1380,7 @@ function askWorkspace(title, initial = {}) {
       if (env.isWsl) choices.push({ kind: 'local', icon: ICO_WIN, name: 'Local (Windows)', sub: 'Windows host via WSL interop' });
     }
     choices.push({ kind: 'ssh', icon: ICO_SSH, name: 'Connect via SSH', sub: 'A remote host over ssh' });
+    const choiceOf = (k) => choices.find((c) => c.kind === k) || choices[0];
 
     function paint() {
       optsEl.innerHTML = '';
@@ -1371,6 +1396,7 @@ function askWorkspace(title, initial = {}) {
         row.addEventListener('click', () => {
           sel = c.kind;
           sshEl.style.display = sel === 'ssh' ? '' : 'none';
+          clearStatus();
           paint();
           if (sel === 'ssh') sshEl.focus();
         });
@@ -1378,41 +1404,95 @@ function askWorkspace(title, initial = {}) {
       }
       sshEl.style.display = sel === 'ssh' ? '' : 'none';
     }
-    paint();
-
-    document.body.appendChild(overlay);
-    nameEl.focus();
-    if (initial.name) nameEl.select();
 
     const done = (val) => { overlay.remove(); resolve(val); };
+
+    function setStatus(msg, kind) {
+      statusEl.style.display = '';
+      statusEl.className = 'ws-status' + (kind ? ' ws-status-' + kind : '');
+      statusEl.textContent = msg;
+    }
+    function clearStatus() { statusEl.style.display = 'none'; statusEl.textContent = ''; statusEl.className = 'ws-status'; }
+
+    let committed = null;   // the connection target, locked in once step 1 passes
+
+    function showStep(n) {
+      step1El.style.display = n === 1 ? '' : 'none';
+      step2El.style.display = n === 2 ? '' : 'none';
+      stepBadge.textContent = `Step ${n} of 2`;
+      if (n === 1) { nameEl.focus(); if (nameEl.value) nameEl.select(); return; }
+      const c = choiceOf(sel);
+      summaryEl.innerHTML = c.icon + `<span class="ws-conn-summary-text"></span>`;
+      summaryEl.querySelector('.ws-conn-summary-text').textContent =
+        sel === 'ssh' ? `SSH · ${committed.host}` : `${c.name} · ${c.sub}`;
+      dirEl.focus();
+    }
+
+    // Step 1 → step 2: validate, and for SSH verify the host is reachable before
+    // moving on (so Browse on step 2 actually has a filesystem to list).
+    async function goNext() {
+      if (nextBtn.disabled) return;
+      const name = (nameEl.value || '').trim();
+      if (!name) { nameEl.focus(); setStatus('Please enter a workspace name.', 'error'); return; }
+      const host = (sshEl.value || '').trim();
+      if (sel === 'ssh' && !host) { sshEl.focus(); setStatus('Enter an SSH host (user@hostname).', 'error'); return; }
+      const target = { kind: sel, host: sel === 'ssh' ? host : '' };
+
+      if (sel === 'ssh') {
+        nextBtn.disabled = true;
+        setStatus(`Connecting to ${host}…`, 'busy');
+        const res = await window.hydra.testConn(target);
+        nextBtn.disabled = false;
+        if (!res || !res.ok) {
+          setStatus(`Could not connect: ${(res && res.error) || 'unknown error'}`, 'error');
+          return;
+        }
+        if (res.note) setStatus(res.note, 'ok'); else clearStatus();
+      } else {
+        clearStatus();
+      }
+      committed = target;
+      showStep(2);
+    }
+
     const submit = () => {
       const name = (nameEl.value || '').trim();
-      if (!name) { nameEl.focus(); return; }       // name is required
-      const host = (sshEl.value || '').trim();
-      if (sel === 'ssh' && !host) { sshEl.focus(); return; }   // SSH needs a host
-      const target = { kind: sel, host: sel === 'ssh' ? host : '' };
-      done({ name, dir: (dirEl.value || '').trim(), target });
+      if (!name || !committed) { showStep(1); return; }   // shouldn't happen; bounce back
+      done({ name, dir: (dirEl.value || '').trim(), target: committed });
     };
-    overlay.querySelector('.modal-ok').onclick = submit;
+
+    nextBtn.onclick = goNext;
+    finishBtn.onclick = submit;
+    overlay.querySelector('.ws-back').onclick = () => { clearStatus(); showStep(1); };
     overlay.querySelector('.modal-cancel').onclick = () => done(null);
     overlay.querySelector('.modal-browse').onclick = async () => {
-      const picked = await browseDir(dirEl.value || '');
+      // Browse the filesystem of the connection committed in step 1.
+      const picked = await browseDir(dirEl.value || '', committed);
       if (picked) dirEl.value = picked;
-      nameEl.focus();
+      dirEl.focus();
     };
     overlay.addEventListener('keydown', (e) => {
       e.stopPropagation();
-      if (e.key === 'Enter') { e.preventDefault(); submit(); }
-      if (e.key === 'Escape') { e.preventDefault(); done(null); }
+      if (e.key === 'Escape') { e.preventDefault(); done(null); return; }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (step2El.style.display === 'none') goNext(); else submit();
+      }
     });
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(null); });
+
+    paint();
+    document.body.appendChild(overlay);
+    showStep(1);
   });
 }
 
 // In-app, VSCode-themed folder picker. The native GTK dialog can't be themed
-// under WSLg, so we navigate directories ourselves via fs:listDir. Resolves to
-// the chosen absolute path, or null if cancelled.
-function browseDir(startPath) {
+// under WSLg, so we navigate directories ourselves via fs:listDir. `connTarget`
+// is the chosen connection (wsl/local/ssh) so we browse THAT filesystem — e.g.
+// the WSL distro's tree from a native Windows build, not the Windows host.
+// Resolves to the chosen absolute path, or null if cancelled.
+function browseDir(startPath, connTarget) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -1438,8 +1518,8 @@ function browseDir(startPath) {
 
     const done = (val) => { overlay.remove(); resolve(val); };
 
-    async function navigate(target) {
-      const res = await window.hydra.listDir(target);
+    async function navigate(dir) {
+      const res = await window.hydra.listDir({ path: dir, target: connTarget || null });
       if (!res) return;
       current = res.path;
       pathEl.textContent = res.path;
@@ -1452,7 +1532,12 @@ function browseDir(startPath) {
         up.onclick = () => navigate(res.parent);
         listEl.appendChild(up);
       }
-      if (!res.entries.length && !res.parent) {
+      if (res.unreachable) {
+        const empty = document.createElement('div');
+        empty.className = 'dir-empty';
+        empty.textContent = "Couldn't list this connection — type the path manually.";
+        listEl.appendChild(empty);
+      } else if (!res.entries.length && !res.parent) {
         const empty = document.createElement('div');
         empty.className = 'dir-empty';
         empty.textContent = 'No subfolders';
@@ -1910,8 +1995,10 @@ window.addEventListener('beforeunload', () => { clearTimeout(saveTimer); saveSta
       createPane({ workspace: id, label: sp.label, pinned: sp.pinned, cwd: sp.cwd, command: sp.command });
     }
   }
-  // First run (or an empty active tab): seed it with the default panes.
-  if (!panesOf(store.active).length) {
+  // An open-but-empty active tab gets seeded with the default panes. A fresh
+  // install has no active tab at all (store.active === null) — it boots straight
+  // to the welcome screen, with no default workspace loaded.
+  if (store.active && store.tabs[store.active] && !panesOf(store.active).length) {
     restoreToolbar(store.tabs[store.active].toolbar);
     setPaneCount(DEFAULT_PANES);
   }
