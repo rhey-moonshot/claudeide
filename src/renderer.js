@@ -304,6 +304,10 @@ function createPane(opts = {}) {
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
+  // SerializeAddon snapshots the live screen on demand — used to seed a Super
+  // Saiyan mirror so the popup shows the prompt instantly. Idle until called.
+  const serialize = new SerializeAddon.SerializeAddon();
+  term.loadAddon(serialize);
   term.open(el.querySelector('.pane-body'));
 
   // Intercept app shortcuts before xterm forwards the keys to the PTY.
@@ -314,7 +318,7 @@ function createPane(opts = {}) {
   });
 
   const p = {
-    id, el, term, fit,
+    id, el, term, fit, serialize,
     dot: el.querySelector('.dot'),
     stateLabel: el.querySelector('.pane-state-label'),
     status: el.querySelector('.pane-status'),
@@ -612,6 +616,7 @@ function closePane(p) {
   p.term.dispose();
   p.el.remove();
   panes.delete(p.id);
+  if (superSaiyan) recomputeStack();   // drop its card if it was stacked
   relayout();
   updateSummary();
   renderGitStatus();   // clears the footer if this was the focused pane
@@ -1758,8 +1763,195 @@ function jumpToAttention() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Super Saiyan Mode — a center-screen "deck of cards" of every pane that needs
+// you. The FRONT card is a live mirror (a 2nd xterm fed the same PTY, input
+// routed back to the same shell); cards behind are static and only go live when
+// they reach the front. Submitting a reply (Enter) pops the front card; the next
+// slides up. The originals in the tab never move or close — this is a reflection.
+// Performance: at most ONE extra terminal exists at a time.
+// ---------------------------------------------------------------------------
+let superSaiyan = false;     // mode on/off
+let ssOverlay = null;        // the overlay DOM, or null
+let ssStack = [];            // pane ids in the deck, front = index 0
+let ssMirror = null;         // { paneId, term, fit, inputDispose, restore } for the front
+const ssSuppressed = new Set(); // ids dismissed via Enter, hidden until their state clears
+
+function ssAttentionPanes() {
+  // Stable on-screen order; skip panes the user just replied to (state lags).
+  return [...panes.values()].filter((p) => needsAttention(p) && !ssSuppressed.has(p.id));
+}
+
+function toggleSuperSaiyan() { superSaiyan ? exitSuperSaiyan() : enterSuperSaiyan(); }
+
+function enterSuperSaiyan() {
+  if (superSaiyan) return;
+  superSaiyan = true;
+  const btn = document.getElementById('ss-toggle');
+  if (btn) btn.classList.add('active');
+  buildSuperSaiyanOverlay();
+  ssStack = ssAttentionPanes().map((p) => p.id);
+  renderDeck();
+}
+
+function exitSuperSaiyan() {
+  if (!superSaiyan) return;
+  superSaiyan = false;
+  const btn = document.getElementById('ss-toggle');
+  if (btn) btn.classList.remove('active');
+  disposeFrontMirror();
+  if (ssOverlay) { ssOverlay.remove(); ssOverlay = null; }
+  ssStack = [];
+  ssSuppressed.clear();
+  // Whatever pane was focused before stays focused; refit visible panes.
+  for (const q of panesOf(store.active)) fitPane(q);
+}
+
+function buildSuperSaiyanOverlay() {
+  if (ssOverlay) return;
+  const ov = document.createElement('div');
+  ov.className = 'ss-overlay';
+  ov.innerHTML = `
+    <div class="ss-panel">
+      <div class="ss-bar">
+        <span class="ss-brand"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg> Super Saiyan</span>
+        <span class="ss-count"></span>
+        <button class="ss-exit" title="Exit Super Saiyan (button or Ctrl+Shift+S)">Exit ⤬</button>
+      </div>
+      <div class="ss-stage">
+        <div class="ss-deck"></div>
+        <div class="ss-empty">✓ Nothing needs you right now.</div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ssOverlay = ov;
+  ov.querySelector('.ss-exit').onclick = () => exitSuperSaiyan();
+}
+
+// Reconcile the deck with the live attention set (called on state changes).
+// The FRONT card is sticky — it leaves only when you reply (Enter) or its pane
+// closes — so a transient state flip can't yank the card you're working on.
+function recomputeStack() {
+  if (!superSaiyan) return;
+  const want = ssAttentionPanes().map((p) => p.id);
+  ssStack = ssStack.filter((id, i) => (i === 0 ? panes.has(id) : want.includes(id)));
+  for (const id of want) if (!ssStack.includes(id)) ssStack.push(id); // append new
+  renderDeck();
+}
+
+function renderDeck() {
+  if (!ssOverlay) return;
+  const deck = ssOverlay.querySelector('.ss-deck');
+  const countEl = ssOverlay.querySelector('.ss-count');
+  const emptyEl = ssOverlay.querySelector('.ss-empty');
+  const n = ssStack.length;
+  countEl.textContent = n ? `${n} pane${n > 1 ? 's' : ''} need you` : '';
+  emptyEl.style.display = n ? 'none' : '';
+  deck.style.display = n ? '' : 'none';
+
+  // Front card: keep the live mirror if the front pane is unchanged; otherwise
+  // rebuild it. (Rebuilding only on change avoids flicker / losing focus.)
+  const frontId = ssStack[0] || null;
+  if (!frontId) { disposeFrontMirror(); deck.innerHTML = ''; return; }
+  if (!ssMirror || ssMirror.paneId !== frontId) { disposeFrontMirror(); buildDeckDom(deck); createFrontMirror(frontId); }
+  else { layoutBehindCards(deck); }
+}
+
+// (Re)build the deck DOM: behind cards (static) + the persistent front card.
+function buildDeckDom(deck) {
+  deck.innerHTML = '';
+  layoutBehindCards(deck);
+  const front = document.createElement('div');
+  front.className = 'ss-card ss-front';
+  front.innerHTML = `<div class="ss-card-head"><span class="ss-card-title"></span><span class="ss-card-tag">needs you</span></div><div class="ss-card-body"></div>`;
+  deck.appendChild(front);
+}
+
+// Static cards peeking out behind the front, so the pile reads as a deck. Capped
+// at a few visible offsets; the real total is in the count badge.
+function layoutBehindCards(deck) {
+  for (const old of [...deck.querySelectorAll('.ss-behind')]) old.remove();
+  const behind = ssStack.slice(1);
+  const shown = Math.min(behind.length, 4);
+  for (let i = shown - 1; i >= 0; i--) {
+    const p = panes.get(behind[i]);
+    const card = document.createElement('div');
+    card.className = 'ss-card ss-behind';
+    const depth = i + 1;                                   // 1 = just behind front
+    card.style.transform = `translate(-50%, -50%) translate(${depth * 14}px, ${depth * -12}px) scale(${1 - depth * 0.03})`;
+    card.style.zIndex = String(10 - depth);
+    card.style.opacity = String(1 - depth * 0.16);
+    const name = p ? `${p.wsName ? p.wsName + ' / ' : ''}${(p.title.textContent || p.id).trim()}` : '(closed)';
+    card.innerHTML = `<div class="ss-card-head"><span class="ss-card-title"></span><span class="ss-card-tag">needs you</span></div>`;
+    card.querySelector('.ss-card-title').textContent = name;
+    // insert behind any existing front card
+    deck.insertBefore(card, deck.querySelector('.ss-front'));
+  }
+}
+
+function createFrontMirror(paneId) {
+  const src = panes.get(paneId);
+  const front = ssOverlay && ssOverlay.querySelector('.ss-front');
+  if (!src || !front) return;
+  front.querySelector('.ss-card-title').textContent =
+    `${src.wsName ? src.wsName + ' / ' : ''}${(src.title.textContent || src.id).trim()}`;
+  const body = front.querySelector('.ss-card-body');
+  body.innerHTML = '';
+
+  const term = new Terminal({
+    theme: xtermTheme(themeId),
+    fontFamily: 'ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace',
+    fontSize: 14, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(body);
+  // Seed instantly from the source's current screen (works even for an idle
+  // prompt that won't emit new data on its own).
+  try { term.write(src.serialize.serialize()); } catch (_) {}
+
+  // Input goes to the SAME shell. Enter = reply submitted → pop this card.
+  const inputDispose = term.onData((data) => {
+    window.hydra.input(paneId, data);
+    if (data.indexOf('\r') !== -1) setTimeout(() => { if (ssStack[0] === paneId) ssDismissFront(); }, 30);
+  });
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type === 'keydown' && handleShortcut(e)) { e.preventDefault(); e.stopPropagation(); return false; }
+    return true;
+  });
+
+  // Fit the mirror to the big card and resize the PTY to match so the TUI
+  // repaints to fill it. We restore the PTY to the original pane's size when the
+  // card is dismissed — the original xterm's own cols/rows never changed.
+  const restore = () => { try { window.hydra.resize(paneId, src.term.cols, src.term.rows); } catch (_) {} };
+  ssMirror = { paneId, term, fit, inputDispose, restore };
+  requestAnimationFrame(() => {
+    if (!ssMirror || ssMirror.paneId !== paneId) return;
+    try { fit.fit(); window.hydra.resize(paneId, term.cols, term.rows); } catch (_) {}
+    term.focus();
+  });
+}
+
+function disposeFrontMirror() {
+  if (!ssMirror) return;
+  const m = ssMirror; ssMirror = null;
+  try { m.inputDispose.dispose(); } catch (_) {}
+  try { m.restore(); } catch (_) {}     // PTY back to the original pane's size
+  try { m.term.dispose(); } catch (_) {}
+}
+
+// Pop the front card after a reply: hide its pane until its state actually
+// clears (so it doesn't flash back while detection catches up), advance.
+function ssDismissFront() {
+  const id = ssStack.shift();
+  if (id) ssSuppressed.add(id);
+  disposeFrontMirror();
+  renderDeck();
+}
+
 function handleShortcut(e) {
   if (e.key === 'F11') { toggleZenFocused(); return true; }
+  if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) { toggleSuperSaiyan(); return true; }
   if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.key === 'j')) { jumpToAttention(); return true; }
   // Ctrl+Shift+V — insert the path of a file/image copied to the Windows clipboard.
   // Under WSLg neither drag-from-Explorer nor a normal paste can deliver a Windows
@@ -1832,6 +2024,13 @@ function applyStatus(p, res) {
   // draw the eye to panes that need a human decision
   p.el.classList.toggle('needs-attention', state === 'approval');
   p.el.classList.toggle('has-error', state === 'error');
+
+  // Keep the Super Saiyan deck in sync: a pane that resolved becomes eligible to
+  // re-stack again later; the deck recomputes to add/drop cards as states change.
+  if (superSaiyan) {
+    if (!needsAttention(p)) ssSuppressed.delete(p.id);
+    if (state !== prev) recomputeStack();
+  }
 }
 
 function notifyNeedsYou(p, res) {
@@ -1897,6 +2096,8 @@ window.hydra.onData(({ id, data }) => {
   if (!p) return;
   p.term.write(data);
   p.lastData = performance.now();
+  // Live Super Saiyan mirror of the front pane sees the same stream.
+  if (ssMirror && ssMirror.paneId === id) ssMirror.term.write(data);
   // Status is derived from the composited screen on the next tick (readScreen),
   // which correctly resolves Claude's in-place TUI redraws.
 });
@@ -1956,6 +2157,7 @@ document.getElementById('file-menu').addEventListener('click', (e) => {
   showFileMenu(e.currentTarget);
 });
 document.getElementById('jump-attn').addEventListener('click', jumpToAttention);
+document.getElementById('ss-toggle').addEventListener('click', toggleSuperSaiyan);
 document.getElementById('remote-indicator').addEventListener('click', (e) => {
   e.stopPropagation();
   editActiveWorkspace();   // the pill edits THIS tab's workspace connection
@@ -2027,6 +2229,10 @@ window.hydra.onWindowState(({ maximized }) => {
 
 window.addEventListener('resize', () => {
   for (const p of panes.values()) fitPane(p);
+  // Keep the live Super Saiyan mirror filling its (resized) card.
+  if (ssMirror) {
+    try { ssMirror.fit.fit(); window.hydra.resize(ssMirror.paneId, ssMirror.term.cols, ssMirror.term.rows); } catch (_) {}
+  }
 });
 
 // ---- text zoom -------------------------------------------------------------

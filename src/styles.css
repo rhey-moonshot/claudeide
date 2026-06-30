@@ -890,3 +890,75 @@ body.zen #zen-exit { display: inline-flex; align-items: center; gap: 6px; opacit
 .theme-menu .theme-check { color: var(--accent); font-size: 14px; opacity: 0; flex: 0 0 auto; }
 .theme-menu .menu-item.active .theme-check { opacity: 1; }
 .theme-menu .menu-item.active .theme-name { font-weight: 600; }
+
+/* ---- Super Saiyan Mode ---- */
+:root { --ss-aura: #ffc23d; --ss-aura-2: #ff8a00; }
+
+.ss-toggle {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  background: var(--btn); color: var(--text); border: 1px solid transparent;
+  border-radius: var(--radius-sm); padding: 4px 10px; cursor: pointer; font-size: 13px;
+}
+.ss-toggle .ico { width: 14px; height: 14px; }
+.ss-toggle:hover { background: var(--btn-hover); color: var(--bright); }
+.ss-toggle.active {
+  color: #1a1300; background: linear-gradient(180deg, var(--ss-aura), var(--ss-aura-2));
+  border-color: transparent; box-shadow: 0 0 0 1px var(--ss-aura-2), 0 0 14px rgba(255,170,0,.55);
+}
+
+.ss-overlay {
+  position: fixed; inset: 0; z-index: 98;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(120% 120% at 50% 0%, rgba(255,170,0,.10), rgba(0,0,0,.66) 60%);
+  backdrop-filter: blur(2px);
+}
+.ss-panel {
+  width: 84vw; height: 84vh;            /* comfortably >= 3/4 of the window */
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--ss-aura-2);
+  border-radius: 12px; box-shadow: 0 24px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,170,0,.25);
+  overflow: hidden;
+}
+.ss-bar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--contrast);
+  background: linear-gradient(180deg, rgba(255,170,0,.12), transparent);
+}
+.ss-brand { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; color: var(--ss-aura); letter-spacing: .3px; }
+.ss-brand .ico { width: 16px; height: 16px; }
+.ss-count { color: var(--muted); font-size: 13px; }
+.ss-exit {
+  margin-left: auto; background: var(--btn); color: var(--text);
+  border: 1px solid transparent; border-radius: var(--radius-sm); padding: 5px 12px; cursor: pointer; font-size: 13px;
+}
+.ss-exit:hover { background: var(--btn-hover); color: var(--bright); }
+
+.ss-stage { position: relative; flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.ss-empty { color: var(--muted); font-size: 15px; }
+.ss-deck { position: absolute; inset: 0; }
+
+.ss-card {
+  position: absolute; top: 50%; left: 50%;
+  width: 92%; height: 90%;
+  background: var(--bg); border: 1px solid var(--contrast); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.ss-behind {
+  /* transform/opacity/z-index are set inline per depth in layoutBehindCards */
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.ss-front {
+  transform: translate(-50%, -50%);
+  z-index: 20; border-color: var(--ss-aura-2);
+  box-shadow: 0 18px 60px rgba(0,0,0,.6), 0 0 0 1px var(--ss-aura-2), 0 0 26px rgba(255,170,0,.35);
+}
+.ss-card-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-bottom: 1px solid var(--contrast); background: var(--panel);
+}
+.ss-card-title { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+.ss-card-tag { font-size: 12px; color: var(--ss-aura); flex: none; }
+.ss-card-body { flex: 1; min-height: 0; padding: 6px 8px; }
+.ss-card-body .xterm { height: 100%; }
