@@ -260,7 +260,12 @@ function listDirViaShell(mode, hostOrDistro, startDir) {
       args = ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', hostOrDistro, script];
     } else { // 'wsl' — a specific distro (or the default when none given)
       file = 'wsl.exe';
-      args = hostOrDistro ? ['-d', hostOrDistro, 'sh', '-c', script] : ['sh', '-c', script];
+      // --exec runs sh directly instead of through the distro's login shell.
+      // Without it, wsl.exe routes the command through the login shell, which
+      // expands our script's $vars (e.g. the loop's $f) one extra time and
+      // blanks them out — so the folder loop printed only empty names.
+      const wslArgs = ['--exec', 'sh', '-c', script];
+      args = hostOrDistro ? ['-d', hostOrDistro, ...wslArgs] : wslArgs;
       opts.env = { ...process.env, WSL_UTF8: '1' };  // make wsl.exe emit UTF-8, not UTF-16
     }
 
@@ -523,7 +528,8 @@ function registerIpc() {
     if (kind === 'wsl' && IS_WIN) {
       const distro = (target && target.distro) || '';
       return await new Promise((resolve) => {
-        const args = distro ? ['-d', distro, 'sh', '-c', 'echo HYDRA_OK'] : ['sh', '-c', 'echo HYDRA_OK'];
+        const probe = ['--exec', 'sh', '-c', 'echo HYDRA_OK'];
+        const args = distro ? ['-d', distro, ...probe] : probe;
         execFile('wsl.exe', args,
           { timeout: 12000, windowsHide: true, env: { ...process.env, WSL_UTF8: '1' } },
           (err, out, stderr) => {
