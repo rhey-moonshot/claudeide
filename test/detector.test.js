@@ -58,6 +58,23 @@ check('lingering approval but now idle -> input', [
   '  ? for shortcuts',
 ], 'input');
 
+check('idle (auto mode footer, no box)', [
+  '● Want me to dig into any specific leg?',
+  '',
+  '❋ Sautéed for 2m 28s',
+  '',
+  '❯',
+  '▶▶ auto mode on (shift+tab to cycle) · ← for agents',
+], 'input', 'dig into');
+
+check('idle (accept-edits footer)', [
+  '● All set.',
+  '╭─────╮',
+  '│ >   │',
+  '╰─────╯',
+  '  ⏵⏵ accept edits on (shift+tab to cycle)',
+], 'input');
+
 check('working wins over old idle hint above', [
   '  ? for shortcuts',
   '● Now running the build.',

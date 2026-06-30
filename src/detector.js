@@ -22,8 +22,10 @@
     interrupt: /esc to interrupt/i,
     // permission / confirmation prompts
     approval: /(do you want to (?:proceed|make this edit|create|run|allow)|yes,?\s*and don'?t ask again|❯\s*1\.\s*yes\b|press\s+enter\s+to)/i,
-    // idle input box footer hint
-    shortcuts: /(\?\s*for shortcuts|⏵⏵\s*accept edits|bypass permissions on)/i,
+    // idle input box footer hint — covers the plain "? for shortcuts" footer and
+    // the mode footers Claude shows when waiting at the prompt: "⏵⏵ accept edits
+    // on", "▶▶ auto mode on (shift+tab to cycle)", "auto-accept edits on", etc.
+    shortcuts: /(\?\s*for shortcuts|[⏵▶]{2}\s*(?:accept edits|auto[- ]?accept|auto mode)|auto[- ]?accept edits on|bypass permissions on)/i,
     // "● Bash(npm test)"  /  "● Update(src/foo.ts)"
     tool: /●\s*([A-Z][A-Za-z]+)\(([^)]*)\)/,
     // any assistant action bullet
