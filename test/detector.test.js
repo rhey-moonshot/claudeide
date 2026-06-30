@@ -75,6 +75,23 @@ check('idle (accept-edits footer)', [
   '  ⏵⏵ accept edits on (shift+tab to cycle)',
 ], 'input');
 
+check('working: spinner + auto-mode footer, "esc to interrupt" truncated', [
+  '● Backend builds. Let me check existing routes.',
+  '',
+  '✳ Fixing TC-DOC document upload… (39m 57s)',
+  '  ⎿ TC-DOC-001/002: Document upload + versioni…',
+  '     ✓ Map loan-management architecture for triag…',
+  '     … +3 completed',
+  '',
+  '> ',
+  '▶▶ auto mode on (shift+tab to cycle) · esc to interrup',   // clipped final 't'
+], 'working', 'Fixing');
+
+check('working: long multi-word gerund line, no interrupt on it', [
+  '✶ Reticulating splines and warming caches… (2m 5s)',
+  '▶▶ auto mode on (shift+tab to cycle) · esc to interrupt',
+], 'working');
+
 check('working wins over old idle hint above', [
   '  ? for shortcuts',
   '● Now running the build.',
