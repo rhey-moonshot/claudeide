@@ -938,8 +938,8 @@ body.zen #zen-exit { display: inline-flex; align-items: center; gap: 6px; opacit
 .ss-deck { position: absolute; inset: 0; }
 
 .ss-card {
-  position: absolute; top: 50%; left: 50%;
-  width: 92%; height: 90%;
+  position: absolute; top: 54%; left: 50%;     /* slightly low to leave room for the fan above */
+  width: 90%; height: 82%;
   background: var(--bg); border: 1px solid var(--contrast); border-radius: 10px;
   box-shadow: 0 12px 40px rgba(0,0,0,.5); overflow: hidden;
   display: flex; flex-direction: column;

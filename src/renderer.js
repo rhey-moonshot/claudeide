@@ -326,6 +326,12 @@ function createPane(opts = {}) {
     git: null,        // last-seen { branch, repo, detached } or null
     lastData: 0,
     state: 'init',
+    // "Your turn": set when the pane finishes a turn (was busy, now idle) and you
+    // weren't watching it; cleared when you focus the pane. `settling` debounces a
+    // single-tick spinner misread; `lastRes` lets focus repaint the badge at once.
+    awaiting: false,
+    settling: false,
+    lastRes: null,
     exited: false,
     pid: null,
     label,
@@ -564,6 +570,14 @@ function cwdInput() { return document.getElementById('cwd').value.trim(); }
 function focusPane(p) {
   for (const q of panes.values()) q.el.classList.toggle('focused', q === p);
   focusedId = p.id;
+  // Returning to the pane answers its "your turn" — clear the attention flag and
+  // repaint its badge right away (don't wait for the next status tick).
+  if (p.awaiting || p.settling) {
+    p.awaiting = false;
+    p.settling = false;
+    if (p.lastRes) applyStatus(p, p.lastRes);
+    updateSummary();
+  }
   renderGitStatus();   // show this pane's cached git immediately…
   refreshGit(p);       // …then refresh it in the background
   p.term.focus();
@@ -752,21 +766,23 @@ function restoreToolbar(t) {
 // ---- tabs (independent workspace instances) --------------------------------
 // Aggregate the live status of a tab's panes, for its tab indicator.
 function workspaceStatus(ws) {
-  let working = 0, approval = 0, error = 0, ready = 0, dead = 0, total = 0;
+  let working = 0, approval = 0, error = 0, ready = 0, dead = 0, awaiting = 0, total = 0;
   for (const p of panesOf(ws)) {
     total++;
     if (p.state === 'working') working++;
     else if (p.state === 'approval') approval++;
     else if (p.state === 'error') error++;
     else if (p.state === 'dead') dead++;
+    else if (p.awaiting) awaiting++;   // idle, but finished a turn → your turn
     else ready++;
   }
   let dot = 'ready';
   if (approval) dot = 'approval';
   else if (error) dot = 'error';
   else if (working) dot = 'busy';
+  else if (awaiting) dot = 'approval';   // same attention color as a permission prompt
   else if (total && dead === total) dot = '';
-  return { working, approval, error, ready, dead, total, dot };
+  return { working, approval, error, ready, dead, awaiting, total, dot };
 }
 
 function escapeHtml(s) {
@@ -843,9 +859,10 @@ function updateTabStatus() {
     const bits = [];
     if (s.working) bits.push(`⚙${s.working}`);
     if (s.approval) bits.push(`⚠${s.approval}`);
+    if (s.awaiting) bits.push(`🔔${s.awaiting}`);
     if (s.error) bits.push(`✗${s.error}`);
     tab.querySelector('.tab-meta').textContent = bits.length ? bits.join(' ') : `${s.total}`;
-    tab.classList.toggle('attn', s.approval + s.error > 0);
+    tab.classList.toggle('attn', s.approval + s.error + s.awaiting > 0);
   }
 }
 
@@ -1741,7 +1758,7 @@ function flash(msg) {
   flashTimer = setTimeout(() => f.classList.remove('show'), 1300);
 }
 
-function needsAttention(p) { return p.state === 'approval' || p.state === 'error'; }
+function needsAttention(p) { return p.state === 'approval' || p.state === 'error' || !!p.awaiting; }
 
 // Cycle focus to the next pane that needs you — ACROSS workspaces, switching
 // tabs if the next one lives in a background workspace.
@@ -1757,7 +1774,8 @@ function jumpToAttention() {
       focusPane(cand);
       cand.el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       const name = (cand.title.textContent || cand.id).trim();
-      flash(`${cand.wsName || ''} / ${name} — ${cand.state === 'approval' ? 'needs you' : 'error'}`);
+      const why = cand.state === 'approval' ? 'needs you' : cand.state === 'error' ? 'error' : 'your turn';
+      flash(`${cand.wsName || ''} / ${name} — ${why}`);
       return;
     }
   }
@@ -1878,9 +1896,11 @@ function layoutBehindCards(deck) {
     const card = document.createElement('div');
     card.className = 'ss-card ss-behind';
     const depth = i + 1;                                   // 1 = just behind front
-    card.style.transform = `translate(-50%, -50%) translate(${depth * 14}px, ${depth * -12}px) scale(${1 - depth * 0.03})`;
+    // Fan up-and-back with a growing tilt, like a held hand of cards — so the
+    // pile reads as a deck and the peeking heads hint at the count.
+    card.style.transform = `translate(-50%, -50%) translate(${depth * 11}px, ${depth * -15}px) rotate(${depth * 1.6}deg) scale(${1 - depth * 0.035})`;
     card.style.zIndex = String(10 - depth);
-    card.style.opacity = String(1 - depth * 0.16);
+    card.style.opacity = String(1 - depth * 0.17);
     const name = p ? `${p.wsName ? p.wsName + ' / ' : ''}${(p.title.textContent || p.id).trim()}` : '(closed)';
     card.innerHTML = `<div class="ss-card-head"><span class="ss-card-title"></span><span class="ss-card-tag">needs you</span></div>`;
     card.querySelector('.ss-card-title').textContent = name;
@@ -2002,8 +2022,28 @@ function switchTabBy(delta) {
 function applyStatus(p, res) {
   const state = res.state;
   const prev = p.state;
-  const ui = STATE_UI[state] || STATE_UI.ready;
   p.state = state;
+  p.lastRes = res;
+
+  const isIdle = state === 'ready' || state === 'input';
+  // A pane that finishes a turn (was busy/at a prompt, now idle) is YOUR TURN:
+  // it's done and waiting on your reply. Flag it for attention until you focus
+  // the pane — unless you're already watching it finish.
+  if (isIdle) {
+    if (prev === 'working' || prev === 'approval') {
+      p.settling = true;            // confirm on the next tick (debounce flicker)
+    } else if (p.settling) {
+      p.settling = false;
+      const watching = p.id === focusedId && p.workspace === store.active && document.hasFocus();
+      if (!watching && !p.awaiting) { p.awaiting = true; notifyDone(p, res); }
+    }
+  } else {
+    p.settling = false;             // back to working / a prompt / exited
+    p.awaiting = false;
+  }
+
+  const attention = state === 'approval' || p.awaiting;
+  const ui = p.awaiting ? STATE_UI.approval : (STATE_UI[state] || STATE_UI.ready);
 
   // Edge-trigger a desktop notification when a pane first starts needing you.
   // (Edge, not level, so a pane stuck at the prompt only pings once.)
@@ -2011,7 +2051,7 @@ function applyStatus(p, res) {
 
   p.dot.className = `dot ${ui.dot}`;
   p.stateLabel.className = `pane-state-label state-${ui.css}`;
-  p.stateLabel.textContent = (res.label || state).slice(0, 16);
+  p.stateLabel.textContent = (p.awaiting ? 'your turn' : (res.label || state)).slice(0, 16);
 
   // status line = activity detail + compact meta (elapsed / tokens / context)
   const meta = res.meta || {};
@@ -2021,8 +2061,8 @@ function applyStatus(p, res) {
   p.status.textContent = text;
   p.status.title = text;
 
-  // draw the eye to panes that need a human decision
-  p.el.classList.toggle('needs-attention', state === 'approval');
+  // draw the eye to panes that need a human decision (or whose turn it now is)
+  p.el.classList.toggle('needs-attention', attention);
   p.el.classList.toggle('has-error', state === 'error');
 
   // Keep the Super Saiyan deck in sync: a pane that resolved becomes eligible to
@@ -2044,6 +2084,19 @@ function notifyNeedsYou(p, res) {
     id: p.id,
     title: `${p.wsName || 'ClaudeIDE'} / ${name} needs you`,
     body: res.detail || 'Awaiting your approval',
+  });
+}
+
+// A pane that just finished its turn and is waiting on your reply ("your turn").
+function notifyDone(p, res) {
+  const t = store && store.tabs[p.workspace];
+  const notifyOn = t ? t.toolbar.notify !== false : true;
+  if (!notifyOn) return;
+  const name = (p.title.textContent || p.id).trim();
+  window.hydra.notify({
+    id: p.id,
+    title: `${p.wsName || 'ClaudeIDE'} / ${name} — your turn`,
+    body: res.detail || 'Finished — awaiting your response',
   });
 }
 
@@ -2073,10 +2126,11 @@ function updateSummary() {
     `<span class="st-item">${a.total} pane${a.total !== 1 ? 's' : ''}</span>` +
     statusSeg('busy', a.working, 'working') +
     statusSeg('approval', a.approval, 'need you') +
+    statusSeg('approval', a.awaiting, 'your turn') +
     statusSeg('ready', a.ready, 'ready') +
     statusSeg('error', a.error, 'error') +
     statusSeg('dead', a.dead, 'exited');
-  summaryEl.classList.toggle('alert', a.approval + a.error > 0);
+  summaryEl.classList.toggle('alert', a.approval + a.error + a.awaiting > 0);
 
   // ...while the title + jump button count attention across ALL workspaces.
   let attnAll = 0;
