@@ -268,6 +268,7 @@ function listDirViaShell(mode, hostOrDistro, startDir) {
       // The \u0000 strip recovers ASCII names if an old wsl.exe ignored
       // WSL_UTF8 and emitted UTF-16LE (paths/names are ASCII anyway).
       const raw = String(stdout || "").replace(/\u0000/g, "").replace(/\r/g, "").split("\n");
+      const i = raw.findIndex((l) => l.startsWith("/"));    // pwd is the first absolute line
       if (i < 0) { resolve(null); return; }                 // unreachable / errored
       const resolved = raw[i];
       const entries = raw.slice(i + 1).filter((l) => l.length > 0);
