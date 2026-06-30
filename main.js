@@ -508,6 +508,16 @@ function registerIpc() {
 
   // ---- workspace persistence ----
   ipcMain.handle('state:load', () => {
+    // A blank "New Window" starts with no open tabs, but should still list the
+    // saved workspaces so they can be opened here too (the same workspace can be
+    // open in several windows). Borrow recents + prefs from the primary state;
+    // its own session persists to the per-pid file (see statePath).
+    if (IS_BLANK_INSTANCE) {
+      try {
+        const s = JSON.parse(fs.readFileSync(primaryStatePath(), 'utf8'));
+        return { version: 4, active: null, open: [], tabs: {}, recents: s.recents || {}, theme: s.theme, zoom: s.zoom };
+      } catch (_) { return null; }
+    }
     try { return JSON.parse(fs.readFileSync(statePath(), 'utf8')); }
     catch (_) { return null; } // missing or corrupt → start fresh
   });

@@ -694,7 +694,9 @@ function normalizeStore(s) {
       if (Number.isFinite(num) && num > tabSeq) tabSeq = num;
     }
     s.open = s.open.filter((id) => s.tabs[id]);
-    if (!s.open.length) return freshStore();
+    // No open tabs → welcome screen, but KEEP the saved-workspace registry and
+    // prefs (so closing the last tab, or a blank New Window, still lists them).
+    if (!s.open.length) return { ...freshStore(), recents: s.recents || {}, theme: s.theme, zoom: s.zoom };
     if (!s.tabs[s.active]) s.active = s.open[0];
     s.recents = s.recents || {};
     for (const id of s.open) {                               // open tabs are always reopenable
