@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>Explorer — ClaudeIDE</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script>
+    // Set the theme before first paint so the chrome doesn't flash (mirrors renderer.js).
+    try { document.documentElement.dataset.theme = (window.hydra && window.hydra.initialTheme) || 'dark'; } catch (_) {}
+  </script>
+</head>
+<body class="explorer-body">
+  <!-- Frameless custom title bar (reuses the main window's window-control styles). -->
+  <header id="xp-titlebar">
+    <span class="xp-title-logo"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" fill="currentColor"/></svg></span>
+    <span class="xp-title-text">Explorer</span>
+    <span class="xp-title-path" id="xp-titlepath"></span>
+    <div class="window-controls">
+      <button id="win-min" class="win-btn" title="Minimize" aria-label="Minimize">
+        <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0" y="4.5" width="10" height="1" fill="currentColor"/></svg>
+      </button>
+      <button id="win-max" class="win-btn" title="Maximize" aria-label="Maximize">
+        <svg class="ico-max" width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor"/></svg>
+        <svg class="ico-restore" width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor"/><path d="M2.5 2.5 V0.5 H9.5 V7.5 H7.5" fill="none" stroke="currentColor"/></svg>
+      </button>
+      <button id="win-close" class="win-btn win-close" title="Close" aria-label="Close">
+        <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 0 L10 10 M10 0 L0 10" stroke="currentColor"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main id="xp-main">
+    <!-- Side bar: the file tree -->
+    <aside id="xp-sidebar">
+      <div class="xp-side-head">
+        <span class="xp-side-title" id="xp-root-name">Explorer</span>
+        <span class="xp-side-actions">
+          <button class="xp-side-btn" id="xp-up" title="Open parent folder">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M5 12l7-7 7 7"/></svg>
+          </button>
+          <button class="xp-side-btn" id="xp-refresh" title="Refresh">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+          </button>
+        </span>
+      </div>
+      <div id="xp-tree" class="xp-tree" tabindex="0"></div>
+    </aside>
+
+    <!-- A draggable sash between the tree and the editor -->
+    <div id="xp-sash"></div>
+
+    <!-- Editor area: tab strip + the open file -->
+    <section id="xp-editor-area">
+      <div id="xp-tabs" class="xp-tabs"></div>
+      <div id="xp-editor-wrap" class="xp-editor-wrap">
+        <div id="xp-gutter" class="xp-gutter" aria-hidden="true"></div>
+        <textarea id="xp-editor" class="xp-editor" spellcheck="false" wrap="off"
+                  autocomplete="off" autocapitalize="off"></textarea>
+      </div>
+      <div id="xp-empty" class="xp-empty">
+        <div class="xp-empty-logo">
+          <svg viewBox="0 0 24 24" width="48" height="48"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z" fill="currentColor"/></svg>
+        </div>
+        <p class="xp-empty-lead">Select a file to start editing</p>
+        <p class="xp-empty-sub">Files open in tabs. <kbd>Ctrl</kbd>+<kbd>S</kbd> to save.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer id="xp-statusbar">
+    <span class="xp-status-path" id="xp-status-path"></span>
+    <span class="xp-status-right">
+      <span id="xp-status-dirty" class="xp-status-dirty"></span>
+      <span id="xp-status-pos" class="xp-status-pos"></span>
+    </span>
+  </footer>
+
+  <script src="explorer.js"></script>
+</body>
+</html>

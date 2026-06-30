@@ -15,6 +15,14 @@ contextBridge.exposeInMainWorld('hydra', {
   loadState: () => ipcRenderer.invoke('state:load'),
   saveState: (state) => ipcRenderer.invoke('state:save', state),
   listDir: (arg) => ipcRenderer.invoke('fs:listDir', arg),
+  // File Explorer window: open one rooted at a pane's live cwd, and the fs ops
+  // its tree/editor need (folders+files listing, text read, text write).
+  // Each fs op takes a { path, target } payload so the Explorer operates on the
+  // pane's own connection (WSL / local / ssh), not just the local fs.
+  openExplorer: (payload) => ipcRenderer.invoke('explorer:open', payload),
+  fsList: (arg) => ipcRenderer.invoke('fs:list', arg),
+  fsRead: (arg) => ipcRenderer.invoke('fs:read', arg),
+  fsWrite: (p, content, target) => ipcRenderer.invoke('fs:write', { path: p, content, target }),
   testConn: (target) => ipcRenderer.invoke('conn:test', target),
   wslList: () => ipcRenderer.invoke('wsl:list'),
   // Resolve the absolute filesystem path of a dropped/pasted File. Uses the

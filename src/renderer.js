@@ -2219,7 +2219,7 @@ function buildSuperSaiyanOverlay() {
       <div class="ss-bar">
         <span class="ss-brand"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg> Super Saiyan</span>
         <span class="ss-count"></span>
-        <button class="ss-exit" title="Exit Super Saiyan (button or Ctrl+Shift+S)">Exit ⤬</button>
+        <button class="ss-exit" title="Exit Super Saiyan (button, F10, or Ctrl+Shift+S)">Exit ⤬</button>
       </div>
       <div class="ss-stage">
         <div class="ss-deck"></div>
@@ -2360,6 +2360,8 @@ function handleShortcut(e) {
   if (e.key === 'F11') { toggleZenFocused(); return true; }
   // F4 — open the File Explorer window rooted at the focused pane's folder.
   if (e.key === 'F4') { openExplorerForPane(); return true; }
+  // F10 (or Ctrl+Shift+S) — toggle Super Saiyan Mode.
+  if (e.key === 'F10') { toggleSuperSaiyan(); return true; }
   if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) { toggleSuperSaiyan(); return true; }
   if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.key === 'j')) { jumpToAttention(); return true; }
   // Ctrl+Shift+V — insert the path of a file/image copied to the Windows clipboard.
@@ -2403,7 +2405,7 @@ function openExplorerForPane(target) {
   const p = target || panes.get(focusedId);
   if (!p) { flash('No pane to open the explorer for'); return; }
   if (!window.hydra.openExplorer) return;
-  window.hydra.openExplorer({ pid: p.pid, cwd: p.cwd || '' });
+  window.hydra.openExplorer({ pid: p.pid, cwd: p.cwd || '', target: p.target || null });
 }
 
 // Ctrl+1..9 and Ctrl+Tab act within the focused group's tab strip.

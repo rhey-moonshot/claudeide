@@ -282,6 +282,131 @@ function listDirViaShell(mode, hostOrDistro, startDir) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Connection-aware filesystem ops for the File Explorer window. The Explorer
+// must reach the same filesystem its pane runs on — the local fs, a WSL distro
+// browsed from a native-Windows build, or an SSH host. These mirror
+// listDirViaShell but also surface files (not just dirs), and add read/write so
+// the editor works over the connection too. Local browsing uses the Node fs
+// directly (handled inline in the fs:* handlers); only ssh/wsl come here.
+// ---------------------------------------------------------------------------
+
+// Single-quote a path for safe interpolation into a POSIX shell command.
+function shQuote(s) { return `'${String(s == null ? '' : s).replace(/'/g, `'\\''`)}'`; }
+
+// Build the spawn spec ([file, args] + env) to run a POSIX `script` on a
+// connection: an ssh host, or a WSL distro (only meaningful on a Windows host).
+function connShellSpec(mode, hostOrDistro, script) {
+  if (mode === 'ssh') {
+    return {
+      file: IS_WIN ? 'ssh.exe' : 'ssh',
+      args: ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=6', hostOrDistro, script],
+      env: { ...process.env },
+    };
+  }
+  // 'wsl' — --exec runs sh directly (no login-shell double var-expansion); a
+  // specific distro via -d, else the default.
+  const wslArgs = ['--exec', 'sh', '-c', script];
+  return {
+    file: 'wsl.exe',
+    args: hostOrDistro ? ['-d', hostOrDistro, ...wslArgs] : wslArgs,
+    env: { ...process.env, WSL_UTF8: '1' },
+  };
+}
+
+// Decide how to reach a target's filesystem. Returns the shell mode/host for
+// ssh (always remote) and for a WSL distro on a native-Windows host; null means
+// "use the local Node fs" (a Linux/WSL host already IS the distro; Windows
+// 'local' is the host fs).
+function explorerConn(target) {
+  const kind = target && target.kind;
+  if (kind === 'ssh' && target.host) return { mode: 'ssh', hostOrDistro: target.host };
+  if (kind === 'wsl' && IS_WIN) return { mode: 'wsl', hostOrDistro: (target && target.distro) || '' };
+  return null;
+}
+
+// A NUL-byte strip — recovers ASCII if an old wsl.exe emitted UTF-16LE despite
+// WSL_UTF8 (paths/names are ASCII). Defined as a regex literal so the source
+// stays free of embedded null bytes.
+const STRIP_NUL = new RegExp(String.fromCharCode(0), 'g');
+
+// List a directory on a connection: resolved path + sorted dirs and files.
+// Each entry line is tagged `d <name>` / `f <name>` so spaces in names survive.
+function listDirFullViaShell(mode, hostOrDistro, startDir) {
+  return new Promise((resolve) => {
+    const dir = (startDir == null ? '' : String(startDir)).replace(/'/g, `'\\''`);
+    const script =
+      `d='${dir}'; if [ -n "$d" ] && [ -d "$d" ]; then cd "$d"; else cd "$HOME" 2>/dev/null || cd /; fi; ` +
+      `pwd; ` +
+      `for e in * .*; do case "$e" in .|..|'*') continue;; esac; ` +
+      `if [ -d "$e" ]; then printf 'd %s\\n' "$e"; elif [ -e "$e" ]; then printf 'f %s\\n' "$e"; fi; done`;
+    const { file, args, env } = connShellSpec(mode, hostOrDistro, script);
+    execFile(file, args, { timeout: 8000, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env }, (_err, stdout) => {
+      const raw = String(stdout || "").replace(STRIP_NUL, "").replace(/\r/g, "").split("\n");
+      const i = raw.findIndex((l) => l.startsWith("/"));    // pwd is the first absolute line
+      if (i < 0) { resolve(null); return; }
+      const resolved = raw[i];
+      const dirs = [], files = [];
+      for (const line of raw.slice(i + 1)) {
+        if (line.length < 3 || (line[0] !== 'd' && line[0] !== 'f')) continue;
+        (line[0] === 'd' ? dirs : files).push(line.slice(2));
+      }
+      const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+      dirs.sort(byName); files.sort(byName);
+      resolve({ path: resolved, parent: posixParent(resolved), dirs, files });
+    });
+  });
+}
+
+// Read a text file on a connection. Guards against directories, missing files,
+// oversized files (maxBuffer), and binary content (NUL byte).
+function readFileViaShell(mode, hostOrDistro, filePath, maxRead) {
+  return new Promise((resolve) => {
+    const q = shQuote(filePath);
+    const script =
+      `f=${q}; if [ ! -e "$f" ]; then echo __HX_NOENT__ >&2; exit 2; fi; ` +
+      `if [ -d "$f" ]; then echo __HX_ISDIR__ >&2; exit 3; fi; cat -- "$f"`;
+    const { file, args, env } = connShellSpec(mode, hostOrDistro, script);
+    execFile(file, args,
+      { timeout: 15000, windowsHide: true, maxBuffer: maxRead + 4096, encoding: 'buffer', env },
+      (err, stdout, stderr) => {
+        const errText = (stderr ? stderr.toString() : '').replace(STRIP_NUL, "");
+        if (errText.includes('__HX_NOENT__')) return resolve({ error: 'File not found' });
+        if (errText.includes('__HX_ISDIR__')) return resolve({ error: 'Not a file' });
+        if (err && err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return resolve({ error: 'File too large to open' });
+        const buf = Buffer.isBuffer(stdout) ? stdout : Buffer.from(String(stdout || ''));
+        if (err && !buf.length) {
+          const line = errText.replace(/\r/g, '').trim().split('\n').pop();
+          return resolve({ error: line || 'Could not read file' });
+        }
+        if (buf.subarray(0, 8000).includes(0)) return resolve({ error: 'Binary file — not shown', binary: true });
+        resolve({ content: buf.toString('utf8'), size: buf.length });
+      });
+  });
+}
+
+// Write a text file on a connection by piping the content to `cat > file`.
+// stdin carries the bytes so no content quoting is needed (only the path).
+function writeFileViaShell(mode, hostOrDistro, filePath, content) {
+  return new Promise((resolve) => {
+    const { file, args, env } = connShellSpec(mode, hostOrDistro, `cat > ${shQuote(filePath)}`);
+    let child;
+    try {
+      child = spawn(file, args, { windowsHide: true, env, timeout: 15000, stdio: ['pipe', 'ignore', 'pipe'] });
+    } catch (e) { return resolve({ ok: false, error: e.message || 'Could not save file' }); }
+    let errText = '';
+    child.stderr.on('data', (d) => { errText += d.toString(); });
+    child.on('error', (e) => resolve({ ok: false, error: e.message || 'Could not save file' }));
+    child.on('close', (code) => {
+      if (code === 0) return resolve({ ok: true });
+      const line = errText.replace(STRIP_NUL, '').replace(/\r/g, '').trim().split('\n').pop();
+      resolve({ ok: false, error: line || `Save failed (exit ${code})` });
+    });
+    try { child.stdin.end(Buffer.from(content == null ? '' : String(content), 'utf8')); }
+    catch (e) { resolve({ ok: false, error: e.message || 'Could not save file' }); }
+  });
+}
+
 function createPty({ id, cols, rows, cwd, target }) {
   const want = normalizeCwd(cwd);
   const spec = resolveTarget(target, cwd);
@@ -404,6 +529,91 @@ function registerIpc() {
   // File → New Window: open a fresh, blank instance of the app.
   ipcMain.handle('window:new', () => { spawnNewInstance(); return true; });
 
+  // Explorer: open a dedicated File Explorer + editor window, rooted at a
+  // pane's working directory, on the pane's own connection (WSL / local / ssh).
+  // For a local connection we resolve the *live* cwd from /proc (follows `cd`,
+  // like git:info); for ssh the pane's cwd is a local path the remote can't
+  // resolve, so we start at the remote home; for a WSL distro the tracked cwd
+  // is a valid Linux path. The Explorer's shell lister re-resolves either way.
+  ipcMain.handle('explorer:open', (_e, { pid, cwd, target } = {}) => {
+    const conn = explorerConn(target);
+    let dir;
+    if (conn) {
+      dir = conn.mode === 'ssh' ? '' : (cwd || '');
+    } else {
+      dir = procCwd(pid) || normalizeCwd(cwd) || os.homedir();
+      try { if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) dir = os.homedir(); }
+      catch (_) { dir = os.homedir(); }
+    }
+    openExplorerWindow(dir, target || null);
+    return true;
+  });
+
+  // Back-compat: each fs:* call takes either a bare path string (local) or a
+  // { path, target } payload naming the connection to operate on.
+  const fsArg = (arg) => (arg && typeof arg === 'object') ? arg : { path: arg, target: null };
+  const MAX_READ = 4 * 1024 * 1024;   // 4 MB — past this, the editor isn't the tool
+
+  // Directory listing for the Explorer: folders and files (dotfiles included,
+  // like VSCode). Distinct from fs:listDir (folders-only, for the folder picker).
+  ipcMain.handle('fs:list', async (_e, arg) => {
+    const { path: dirPath, target } = fsArg(arg);
+    const conn = explorerConn(target);
+    if (conn) {
+      const r = await listDirFullViaShell(conn.mode, conn.hostOrDistro, dirPath);
+      return r || { path: (dirPath && String(dirPath).trim()) || '~', parent: null, dirs: [], files: [], unreachable: true };
+    }
+
+    let dir = dirPath && String(dirPath).trim() ? normalizeCwd(dirPath) : os.homedir();
+    try { if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) dir = os.homedir(); }
+    catch (_) { dir = os.homedir(); }
+    dir = path.resolve(dir);
+
+    const dirs = [], files = [];
+    try {
+      for (const d of fs.readdirSync(dir, { withFileTypes: true })) {
+        let isDir = d.isDirectory();
+        if (d.isSymbolicLink()) {
+          try { isDir = fs.statSync(path.join(dir, d.name)).isDirectory(); }
+          catch (_) { continue; }   // dangling symlink — skip
+        }
+        (isDir ? dirs : files).push(d.name);
+      }
+    } catch (_) { /* unreadable dir -> empty, still navigable up */ }
+
+    const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+    dirs.sort(byName); files.sort(byName);
+    const parent = path.dirname(dir);
+    return { path: dir, parent: parent === dir ? null : parent, dirs, files };
+  });
+
+  // Read a text file for the Explorer editor. Refuses oversized or binary
+  // files (a NUL byte in the first chunk is a reliable binary tell).
+  ipcMain.handle('fs:read', async (_e, arg) => {
+    const { path: filePath, target } = fsArg(arg);
+    const conn = explorerConn(target);
+    if (conn) return await readFileViaShell(conn.mode, conn.hostOrDistro, filePath, MAX_READ);
+    try {
+      const p = normalizeCwd(filePath);
+      const st = fs.statSync(p);
+      if (!st.isFile()) return { error: 'Not a file' };
+      if (st.size > MAX_READ) return { error: `File too large to open (${(st.size / 1048576).toFixed(1)} MB)` };
+      const buf = fs.readFileSync(p);
+      if (buf.subarray(0, 8000).includes(0)) return { error: 'Binary file — not shown', binary: true };
+      return { content: buf.toString('utf8'), size: st.size };
+    } catch (e) { return { error: e.message || 'Could not read file' }; }
+  });
+
+  // Write a text file back from the Explorer editor (Ctrl+S).
+  ipcMain.handle('fs:write', async (_e, { path: filePath, content, target } = {}) => {
+    const conn = explorerConn(target);
+    if (conn) return await writeFileViaShell(conn.mode, conn.hostOrDistro, filePath, content);
+    try {
+      fs.writeFileSync(normalizeCwd(filePath), content == null ? '' : String(content), 'utf8');
+      return { ok: true };
+    } catch (e) { return { ok: false, error: e.message || 'Could not save file' }; }
+  });
+
   // Keep native chrome (menus, scrollbars, dialogs) in step with the in-app theme.
   ipcMain.on('theme:native', (_e, mode) => {
     nativeTheme.themeSource = mode === 'light' ? 'light' : 'dark';
@@ -416,10 +626,12 @@ function registerIpc() {
     return applyZoom(win, action, value);
   });
 
-  // Custom title-bar window controls (the window is frameless).
-  ipcMain.on('win:minimize', () => { if (mainWindow) mainWindow.minimize(); });
-  ipcMain.on('win:toggle-maximize', () => { if (mainWindow) toggleMaximize(mainWindow); });
-  ipcMain.on('win:close', () => { if (mainWindow) mainWindow.close(); });
+  // Custom title-bar window controls (the window is frameless). Target the
+  // window the request came from — not just mainWindow — so the Explorer
+  // window's own title-bar buttons control the Explorer window.
+  ipcMain.on('win:minimize', (e) => { const w = BrowserWindow.fromWebContents(e.sender) || mainWindow; if (w) w.minimize(); });
+  ipcMain.on('win:toggle-maximize', (e) => { const w = BrowserWindow.fromWebContents(e.sender) || mainWindow; if (w) toggleMaximize(w); });
+  ipcMain.on('win:close', (e) => { const w = BrowserWindow.fromWebContents(e.sender) || mainWindow; if (w) w.close(); });
 
   // Manual window dragging — the renderer streams cursor screen coords; we move
   // the window by the delta from where the drag began. (See toggleMaximize note:
@@ -653,6 +865,49 @@ function registerIpc() {
 }
 
 const ICON_PATH = path.join(__dirname, 'assets', 'icon.png');
+
+// File Explorer windows (one per "open explorer" action). Kept separate from
+// `mainWindow` so PTY data / notifications keep flowing only to the app window;
+// these are plain fs browser/editor windows with no panes or workspace state.
+const explorerWindows = new Set();
+
+function openExplorerWindow(startDir, target) {
+  const win = new BrowserWindow({
+    width: 1100,
+    height: 720,
+    minWidth: 560,
+    minHeight: 360,
+    backgroundColor: THEME_CHROME[savedTheme()].bg,
+    title: 'Explorer — ClaudeIDE',
+    icon: ICON_PATH,
+    frame: false,                // custom title bar, like the main window
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      additionalArguments: [`--hydra-theme=${savedTheme()}`],
+    },
+  });
+  try { win.setIcon(ICON_PATH); } catch (_) {}
+
+  explorerWindows.add(win);
+  win.on('closed', () => explorerWindows.delete(win));
+
+  // Keep this window's own max/restore button in sync (mirrors createWindow).
+  const tell = (payload) => { if (!win.isDestroyed()) win.webContents.send('win:state', payload); };
+  win.on('enter-full-screen', () => tell({ maximized: true }));
+  win.on('leave-full-screen', () => tell({ maximized: false }));
+  win.on('maximize', () => tell({ maximized: true }));
+  win.on('unmaximize', () => tell({ maximized: false }));
+
+  // The start directory + connection ride in on the query string; explorer.js
+  // reads them and passes the connection back on every fs op.
+  win.loadFile(path.join(__dirname, 'src', 'explorer.html'), {
+    query: { dir: startDir || '', target: target ? JSON.stringify(target) : '' },
+  });
+  return win;
+}
 
 // Launch a brand-new, blank instance of the app as its own process (File → New
 // Window). A separate process — not a second BrowserWindow — because the app's
