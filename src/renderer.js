@@ -2424,10 +2424,15 @@ function handleShortcut(e) {
     return true;
   }
   if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.key === 'j')) { jumpToAttention(); return true; }
-  // Ctrl+Shift+V — insert the path of a file/image copied to the Windows clipboard.
-  // Under WSLg neither drag-from-Explorer nor a normal paste can deliver a Windows
-  // file, so we reach across to the Windows clipboard and type its path instead.
-  if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) { insertClipboardPath(); return true; }
+  // Ctrl+Shift+C — copy the terminal selection. xterm renders to a canvas, so the
+  // browser's native Ctrl+C can't grab the selection; we read it explicitly. Plain
+  // Ctrl+C is left untouched so it still sends SIGINT to the program.
+  if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c')) { copySelection(); return true; }
+  // Ctrl+Shift+V — smart paste. If the Windows clipboard holds a file/image, insert
+  // its path (the WSLg bridge, since neither drag-from-Explorer nor a normal paste
+  // can deliver a Windows file); otherwise paste the clipboard's plain text. This
+  // makes it the symmetric counterpart to Ctrl+Shift+C.
+  if (e.ctrlKey && e.shiftKey && (e.key === 'V' || e.key === 'v')) { smartPaste(); return true; }
   if (e.ctrlKey && !e.shiftKey && (e.key === 'T' || e.key === 't')) {
     if (store.active) createPane(); else newWorkspace();
     return true;
@@ -2445,6 +2450,49 @@ function handleShortcut(e) {
 // Pull whatever file/image is on the Windows clipboard (via the main process'
 // PowerShell bridge) and type its shell-quoted path into the focused pane. This
 // is the WSLg-friendly stand-in for VSCode's "drag a file into the terminal".
+// Copy the focused pane's terminal selection to the clipboard. xterm draws to a
+// canvas, so there is no DOM selection for the browser's native copy to pick up —
+// we pull the text via getSelection() and write it ourselves. Falls back to a
+// hidden-textarea execCommand copy if the async clipboard API is unavailable.
+function copySelection(target) {
+  const p = target || panes.get(focusedId);
+  if (!p || !p.term) return;
+  const text = p.term.getSelection();
+  if (!text) return;   // nothing selected — stay silent
+  writeClipboardText(text)
+    .then(() => flash('Copied to clipboard'))
+    .catch(() => flash('Could not copy to clipboard'));
+}
+
+// Write plain text to the clipboard. Prefer the async Clipboard API; fall back to
+// the legacy hidden-textarea + execCommand path, which always works in a focused
+// Electron renderer even when navigator.clipboard is blocked.
+function writeClipboardText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).catch(() => legacyCopy(text));
+  }
+  return legacyCopy(text);
+}
+
+function legacyCopy(text) {
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      ok ? resolve() : reject(new Error('execCommand copy failed'));
+    } catch (err) {
+      document.body.removeChild(ta);
+      reject(err);
+    }
+  });
+}
+
 function insertClipboardPath(target) {
   if (!window.hydra.grabClipboard) return;
   const p = target || panes.get(focusedId);
@@ -2456,6 +2504,36 @@ function insertClipboardPath(target) {
     window.hydra.input(p.id, quoted);
     focusPane(p);
   }).catch(() => flash('Could not read the Windows clipboard'));
+}
+
+// Ctrl+Shift+V smart paste: a file/image on the Windows clipboard becomes its
+// shell-quoted path (grabWindowsClipboard returns only files/images, never text),
+// otherwise fall back to pasting the clipboard's plain text. Symmetric counterpart
+// to copySelection (Ctrl+Shift+C).
+function smartPaste(target) {
+  const p = target || panes.get(focusedId);
+  if (!p) return;
+  const grab = window.hydra.grabClipboard
+    ? window.hydra.grabClipboard().catch(() => null)
+    : Promise.resolve(null);
+  grab.then((raws) => {
+    if (raws && raws.length) {
+      const quoted = raws.map((r) => shellQuotePath(toLocalPath(r))).filter(Boolean).join(' ');
+      if (quoted) { window.hydra.input(p.id, quoted); focusPane(p); return; }
+    }
+    // No file/image on the clipboard — paste plain text instead.
+    readClipboardText().then((text) => {
+      if (text) { window.hydra.input(p.id, text); focusPane(p); }
+      else flash('Clipboard is empty');
+    });
+  });
+}
+
+function readClipboardText() {
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    return navigator.clipboard.readText().catch(() => '');
+  }
+  return Promise.resolve('');
 }
 
 // Open the File Explorer window for a pane's folder. The main process resolves
