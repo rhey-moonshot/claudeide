@@ -176,8 +176,8 @@ body { display: flex; flex-direction: column; }
 .win-max.is-maximized .ico-restore { display: block; }
 .brand { font-weight: 600; font-size: 14px; display: flex; align-items: baseline; gap: 7px; }
 .brand .logo { color: var(--accent); font-size: 15px; line-height: 1; align-self: center; }
-.group { display: flex; align-items: center; gap: 6px; }
-.group.grow { flex: 1; min-width: 0; }
+#toolbar .group { display: flex; align-items: center; gap: 6px; }
+#toolbar .group.grow { flex: 1; min-width: 0; }
 .lbl { color: var(--muted); font-size: 14px; }
 .sep { width: 1px; height: 16px; background: var(--border-2); margin: 0 2px; }
 
@@ -351,16 +351,17 @@ body { display: flex; flex-direction: column; }
   min-width: 0;
   background: var(--border);   /* the sash gap color shows through */
 }
-.group {
+#editor > .group {
   flex: 1 1 0;
   display: flex;
   flex-direction: column;
+  align-items: stretch;   /* the tab bar + grid fill the group width (don't inherit toolbar's centering) */
   min-width: 0;
   min-height: 0;
   background: var(--bg);
 }
 /* A faint accent line marks which group has keyboard focus. */
-.group.focused-group > .group-tabbar { box-shadow: inset 0 2px 0 var(--accent); }
+#editor > .group.focused-group > .group-tabbar { box-shadow: inset 0 2px 0 var(--accent); }
 
 /* Resizable divider between adjacent groups. */
 .group-sash {
@@ -797,7 +798,7 @@ body.zen .group-tabbar {
 }
 /* Zen expands one pane: hide the other groups and the sashes, and collapse the
    target pane's group grid to a single cell. */
-body.zen .group:not(.zen-group),
+body.zen #editor > .group:not(.zen-group),
 body.zen .group-sash { display: none; }
 body.zen .group-grid {
   grid-template-columns: 1fr !important;
