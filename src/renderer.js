@@ -2444,6 +2444,20 @@ function handleShortcut(e) {
     switchTabByIndex(parseInt(e.key, 10) - 1);
     return true;
   }
+  // PageUp / PageDown / End — page through the focused pane's scrollback so long
+  // output is easy to read. Only on the shell's normal buffer; a fullscreen app
+  // (vim/less/htop, on the alternate buffer) gets these keys itself. End steals
+  // the key only while scrolled up — otherwise it falls through so readline's
+  // "jump to end of line" still works.
+  if (!e.ctrlKey && !e.altKey && (e.key === 'PageUp' || e.key === 'PageDown' || e.key === 'End')) {
+    const p = panes.get(focusedId);
+    const t = p && p.term;
+    if (t && t.buffer.active.type === 'normal') {
+      if (e.key === 'PageUp') { t.scrollPages(-1); return true; }
+      if (e.key === 'PageDown') { t.scrollPages(1); return true; }
+      if (t.buffer.active.viewportY < t.buffer.active.baseY) { t.scrollToBottom(); return true; }
+    }
+  }
   return false;
 }
 
