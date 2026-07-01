@@ -979,6 +979,7 @@ body.zen #zen-exit { display: inline-flex; align-items: center; gap: 6px; opacit
 .ss-brand { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; color: var(--ss-aura); letter-spacing: .3px; }
 .ss-brand .ico { width: 16px; height: 16px; }
 .ss-count { color: var(--muted); font-size: 13px; }
+.ss-hint { color: var(--muted); font-size: 12px; opacity: .8; }
 .ss-exit {
   margin-left: auto; background: var(--btn); color: var(--text);
   border: 1px solid transparent; border-radius: var(--radius-sm); padding: 5px 12px; cursor: pointer; font-size: 13px;

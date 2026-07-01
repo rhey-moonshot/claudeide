@@ -2175,7 +2175,27 @@ function flash(msg) {
   flashTimer = setTimeout(() => f.classList.remove('show'), 1300);
 }
 
+// Attention = a pane that needs a human: a decision ("need you" — approval), an
+// error, or a finished turn you haven't seen ("your turn"/"my turn"). Drives the
+// title badge and the jump-to-next button. "your turn" and "need you" are
+// combined into this one set.
 function needsAttention(p) { return p.state === 'approval' || p.state === 'error' || !!p.awaiting; }
+
+// Super Saiyan stacks a broader set: everything needsAttention() catches PLUS any
+// pane that simply "became ready"/idle — so the deck surfaces every pane that
+// isn't actively working, not only the ones that pinged you.
+function ssEligible(p) {
+  return needsAttention(p) || p.state === 'ready' || p.state === 'input';
+}
+
+// One combined label for why a pane is in the deck — "your turn" and "need you"
+// share the same stack, this just names the reason on each card.
+function attnReason(p) {
+  if (p.state === 'approval') return 'needs you';
+  if (p.state === 'error') return 'error';
+  if (p.awaiting) return 'your turn';
+  return 'ready';
+}
 
 // Cycle focus to the next pane that needs you — ACROSS workspaces, switching
 // tabs if the next one lives in a background workspace.
@@ -2191,8 +2211,7 @@ function jumpToAttention() {
       focusPane(cand);
       cand.el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       const name = (cand.title.textContent || cand.id).trim();
-      const why = cand.state === 'approval' ? 'needs you' : cand.state === 'error' ? 'error' : 'your turn';
-      flash(`${cand.wsName || ''} / ${name} — ${why}`);
+      flash(`${cand.wsName || ''} / ${name} — ${attnReason(cand)}`);
       return;
     }
   }
@@ -2202,7 +2221,7 @@ function jumpToAttention() {
 // Super Saiyan Mode — a center-screen "deck of cards" of every pane that needs
 // you. The FRONT card is a live mirror (a 2nd xterm fed the same PTY, input
 // routed back to the same shell); cards behind are static and only go live when
-// they reach the front. Submitting a reply (Enter) pops the front card; the next
+// they reach the front. Closing the front card (Ctrl+Del or F9) pops it; the next
 // slides up. The originals in the tab never move or close — this is a reflection.
 // Performance: at most ONE extra terminal exists at a time.
 // ---------------------------------------------------------------------------
@@ -2210,11 +2229,11 @@ let superSaiyan = false;     // mode on/off
 let ssOverlay = null;        // the overlay DOM, or null
 let ssStack = [];            // pane ids in the deck, front = index 0
 let ssMirror = null;         // { paneId, term, fit, inputDispose, restore } for the front
-const ssSuppressed = new Set(); // ids dismissed via Enter, hidden until their state clears
+const ssSuppressed = new Set(); // ids dismissed (Ctrl+Del/F9), hidden until their state clears
 
 function ssAttentionPanes() {
-  // Stable on-screen order; skip panes the user just replied to (state lags).
-  return [...panes.values()].filter((p) => needsAttention(p) && !ssSuppressed.has(p.id));
+  // Stable on-screen order; skip panes the user just closed (state lags).
+  return [...panes.values()].filter((p) => ssEligible(p) && !ssSuppressed.has(p.id));
 }
 
 function toggleSuperSaiyan() { superSaiyan ? exitSuperSaiyan() : enterSuperSaiyan(); }
@@ -2251,6 +2270,7 @@ function buildSuperSaiyanOverlay() {
       <div class="ss-bar">
         <span class="ss-brand"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg> Super Saiyan</span>
         <span class="ss-count"></span>
+        <span class="ss-hint">Ctrl+Del / F9 to close card</span>
         <button class="ss-exit" title="Exit Super Saiyan (button, F10, or Ctrl+Shift+S)">Exit ⤬</button>
       </div>
       <div class="ss-stage">
@@ -2264,8 +2284,8 @@ function buildSuperSaiyanOverlay() {
 }
 
 // Reconcile the deck with the live attention set (called on state changes).
-// The FRONT card is sticky — it leaves only when you reply (Enter) or its pane
-// closes — so a transient state flip can't yank the card you're working on.
+// The FRONT card is sticky — it leaves only when you close it (Ctrl+Del/F9) or
+// its pane closes — so a transient state flip can't yank the card you're on.
 function recomputeStack() {
   if (!superSaiyan) return;
   const want = ssAttentionPanes().map((p) => p.id);
@@ -2319,8 +2339,9 @@ function layoutBehindCards(deck) {
     card.style.zIndex = String(10 - depth);
     card.style.opacity = String(1 - depth * 0.17);
     const name = p ? `${p.wsName ? p.wsName + ' / ' : ''}${(p.title.textContent || p.id).trim()}` : '(closed)';
-    card.innerHTML = `<div class="ss-card-head"><span class="ss-card-title"></span><span class="ss-card-tag">needs you</span></div>`;
+    card.innerHTML = `<div class="ss-card-head"><span class="ss-card-title"></span><span class="ss-card-tag"></span></div>`;
     card.querySelector('.ss-card-title').textContent = name;
+    card.querySelector('.ss-card-tag').textContent = p ? attnReason(p) : '';
     // insert behind any existing front card
     deck.insertBefore(card, deck.querySelector('.ss-front'));
   }
@@ -2332,6 +2353,7 @@ function createFrontMirror(paneId) {
   if (!src || !front) return;
   front.querySelector('.ss-card-title').textContent =
     `${src.wsName ? src.wsName + ' / ' : ''}${(src.title.textContent || src.id).trim()}`;
+  front.querySelector('.ss-card-tag').textContent = attnReason(src);
   const body = front.querySelector('.ss-card-body');
   body.innerHTML = '';
 
@@ -2349,10 +2371,11 @@ function createFrontMirror(paneId) {
   // prompt that won't emit new data on its own).
   try { term.write(src.serialize.serialize()); } catch (_) {}
 
-  // Input goes to the SAME shell. Enter = reply submitted → pop this card.
+  // Input goes to the SAME shell. Enter now just submits the reply to the PTY —
+  // the card is closed explicitly with Ctrl+Del or F9 (see handleShortcut), so a
+  // reply that doesn't finish the turn no longer yanks the card out from under you.
   const inputDispose = term.onData((data) => {
     window.hydra.input(paneId, data);
-    if (data.indexOf('\r') !== -1) setTimeout(() => { if (ssStack[0] === paneId) ssDismissFront(); }, 30);
   });
   term.attachCustomKeyEventHandler((e) => {
     if (e.type === 'keydown' && handleShortcut(e)) { e.preventDefault(); e.stopPropagation(); return false; }
@@ -2395,6 +2418,11 @@ function handleShortcut(e) {
   // F10 (or Ctrl+Shift+S) — toggle Super Saiyan Mode.
   if (e.key === 'F10') { toggleSuperSaiyan(); return true; }
   if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) { toggleSuperSaiyan(); return true; }
+  // Ctrl+Del or F9 — close the front Super Saiyan card and advance to the next.
+  if (superSaiyan && (e.key === 'F9' || (e.ctrlKey && e.key === 'Delete'))) {
+    if (ssStack.length) ssDismissFront();
+    return true;
+  }
   if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.key === 'j')) { jumpToAttention(); return true; }
   // Ctrl+Shift+V — insert the path of a file/image copied to the Windows clipboard.
   // Under WSLg neither drag-from-Explorer nor a normal paste can deliver a Windows
@@ -2502,7 +2530,9 @@ function applyStatus(p, res) {
   // Keep the Super Saiyan deck in sync: a pane that resolved becomes eligible to
   // re-stack again later; the deck recomputes to add/drop cards as states change.
   if (superSaiyan) {
-    if (!needsAttention(p)) ssSuppressed.delete(p.id);
+    // A dismissed card stays hidden until its pane leaves the deck's set (e.g.
+    // starts working again), then it can re-stack next time it becomes ready.
+    if (!ssEligible(p)) ssSuppressed.delete(p.id);
     if (state !== prev) recomputeStack();
   }
 }
