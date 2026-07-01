@@ -6,7 +6,12 @@
 // window never touches Node directly. It opens rooted at the cwd of the pane
 // that launched it (passed in on the query string by the main process).
 
-const hydra = window.hydra;
+// `hydra` (the contextBridge bridge from preload.js) is referenced directly as
+// the global it already is. NOTE: do NOT add `const hydra = window.hydra` here —
+// contextBridge exposes `hydra` as a non-configurable global property, so a
+// top-level `const`/`let` with the same name is a redeclaration that throws a
+// SyntaxError and aborts this entire file (symptom: dead window controls + an
+// empty file tree, because none of the wiring below ever runs).
 
 // ---- icons (inline SVG; match the app's stroke style) ----------------------
 const ICON_CHEVRON =
