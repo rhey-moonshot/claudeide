@@ -831,6 +831,7 @@ function closePane(p) {
   p.term.dispose();
   p.el.remove();
   panes.delete(p.id);
+  ssSuppressed.delete(p.id);           // don't leak a stale id in the now long-lived set
   if (superSaiyan) recomputeStack();   // drop its card if it was stacked
   relayout();
   updateSummary();
@@ -2229,7 +2230,7 @@ let superSaiyan = false;     // mode on/off
 let ssOverlay = null;        // the overlay DOM, or null
 let ssStack = [];            // pane ids in the deck, front = index 0
 let ssMirror = null;         // { paneId, term, fit, inputDispose, restore } for the front
-const ssSuppressed = new Set(); // ids dismissed (Ctrl+Del/F9), hidden until their state clears
+const ssSuppressed = new Set(); // ids dismissed (Ctrl+Del/F9), hidden until new activity — persists across Super Saiyan sessions
 
 function ssAttentionPanes() {
   // Stable on-screen order; skip panes the user just closed (state lags).
@@ -2256,7 +2257,10 @@ function exitSuperSaiyan() {
   disposeFrontMirror();
   if (ssOverlay) { ssOverlay.remove(); ssOverlay = null; }
   ssStack = [];
-  ssSuppressed.clear();
+  // NOTE: ssSuppressed is deliberately NOT cleared here. A card you closed with
+  // F9/Ctrl+Del stays closed across Super Saiyan sessions — it only comes back
+  // once its pane has new activity (see updateStatus, which un-suppresses on the
+  // pane leaving the eligible set even while the mode is off).
   // Whatever pane was focused before stays focused; refit visible panes.
   for (const q of visiblePanes()) fitPane(q);
 }
@@ -2318,7 +2322,9 @@ function buildDeckDom(deck) {
   layoutBehindCards(deck);
   const front = document.createElement('div');
   front.className = 'ss-card ss-front';
-  front.innerHTML = `<div class="ss-card-head"><span class="ss-card-title"></span><span class="ss-card-tag">needs you</span></div><div class="ss-card-body"></div>`;
+  front.innerHTML = `<div class="ss-card-head"><span class="ss-card-title"></span><span class="ss-card-tag">needs you</span><button class="ss-card-close" title="Close this card (same as F9 / Ctrl+Del)">⤬</button></div><div class="ss-card-body"></div>`;
+  // The X closes the front card exactly like F9 / Ctrl+Del.
+  front.querySelector('.ss-card-close').onclick = (e) => { e.stopPropagation(); if (ssStack.length) ssDismissFront(); };
   deck.appendChild(front);
 }
 
@@ -2621,12 +2627,14 @@ function applyStatus(p, res) {
 
   // Keep the Super Saiyan deck in sync: a pane that resolved becomes eligible to
   // re-stack again later; the deck recomputes to add/drop cards as states change.
-  if (superSaiyan) {
-    // A dismissed card stays hidden until its pane leaves the deck's set (e.g.
-    // starts working again), then it can re-stack next time it becomes ready.
-    if (!ssEligible(p)) ssSuppressed.delete(p.id);
-    if (state !== prev) recomputeStack();
-  }
+  //
+  // A dismissed card stays hidden until its pane has NEW activity — i.e. leaves
+  // the eligible set (starts working again) — then it can re-stack next time it
+  // becomes ready. This un-suppress must run even while the mode is OFF so a
+  // dismissal persists across sessions but still lifts once the pane does
+  // something new (see exitSuperSaiyan, which no longer clears ssSuppressed).
+  if (ssSuppressed.has(p.id) && !ssEligible(p)) ssSuppressed.delete(p.id);
+  if (superSaiyan && state !== prev) recomputeStack();
 }
 
 function notifyNeedsYou(p, res) {
