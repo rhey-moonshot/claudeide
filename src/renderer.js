@@ -187,10 +187,22 @@ function makeGroupSection(g) {
   const sec = document.createElement('section');
   sec.className = 'group';
   sec.dataset.group = g.id;
-  sec.innerHTML = '<nav class="group-tabbar"><div class="group-tabs"></div></nav>'
+  // VSCode-style split button pinned to the right of the tab strip.
+  const SPLIT_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><rect x="1.6" y="2.6" width="12.8" height="10.8" rx="1.4"/><line x1="8" y1="2.6" x2="8" y2="13.4"/></svg>';
+  sec.innerHTML =
+    '<nav class="group-tabbar">'
+    + '<div class="group-tabs"></div>'
+    + '<div class="group-actions">'
+    + `<button class="group-split-btn" title="Split editor right">${SPLIT_ICON}</button>`
+    + '</div>'
+    + '</nav>'
     + '<div class="group-grid"></div>';
   // Focus the group when you click anywhere inside it.
   sec.addEventListener('mousedown', () => focusGroup(g.id));
+  sec.querySelector('.group-split-btn').addEventListener('click', (e) => {
+    e.stopPropagation();
+    splitGroupRight(g.id);
+  });
   return sec;
 }
 
@@ -1697,6 +1709,26 @@ function splitTabRight(id) {
   const first = panesOf(id)[0];
   if (first) focusPane(first);
   saveState();
+  flash('split → new group');
+}
+
+// The tab-bar split button (VSCode's "Split Editor Right"). With 2+ tabs it
+// peels the active one into a new group on the right; with a single tab there's
+// nothing to peel, so it spawns a sibling group with a fresh tab that inherits
+// this tab's connection + working dir — either way you end up split.
+function splitGroupRight(groupId) {
+  const g = groupById(groupId) || activeGroupObj();
+  if (!g || !g.active) return;
+  if (g.open.length >= 2) { splitTabRight(g.active); return; }
+
+  if (isZen()) exitZen();
+  const srcTab = store.tabs[g.active];
+  const toolbar = srcTab ? { ...srcTab.toolbar } : defaultToolbar();
+  const name = srcTab ? srcTab.name : 'Terminal';
+  const ng = { id: 'g' + (++gSeq), open: [], active: null, flex: g.flex || 1 };
+  store.groups.splice(store.groups.indexOf(g) + 1, 0, ng);
+  store.activeGroup = ng.id;          // openTab appends into the active group
+  openTab(name, toolbar);
   flash('split → new group');
 }
 

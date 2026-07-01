@@ -378,10 +378,18 @@ body { display: flex; flex-direction: column; }
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
-  overflow-x: auto;
+  overflow: hidden;
   user-select: none;
 }
-.group-tabs { display: flex; align-items: stretch; }
+/* Tabs take the room and scroll under; the actions stay pinned at the right. */
+.group-tabs { display: flex; align-items: stretch; flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.group-actions { display: flex; align-items: stretch; flex: 0 0 auto; }
+.group-split-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; align-self: stretch; padding: 0;
+  background: transparent; border: none; color: var(--muted); cursor: pointer;
+}
+.group-split-btn:hover { color: var(--bright); background: var(--panel-2); }
 
 /* VSCode tabs: full-height, square, separated by hairlines; the active tab
    carries the editor background and a colored top border. */
