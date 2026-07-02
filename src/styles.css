@@ -653,6 +653,27 @@ body.zen #statusbar { display: none; }   /* chrome melts away in focus mode */
 }
 .status-right .credit .credit-by { color: var(--muted); }
 
+/* keyboard-shortcut hints so users learn Super Saiyan / Zen mode */
+.status-right .kbd-hints {
+  display: flex; align-items: center; gap: 14px;
+  min-width: 0; overflow: hidden; flex: 0 1 auto;
+}
+.kbd-hint {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--muted); font-size: 14px; white-space: nowrap;
+  transition: color .1s;
+}
+.kbd-hint:hover { color: var(--bright); }
+.kbd-hint .ico { width: 13px; height: 13px; flex: none; }
+.kbd-hint kbd {
+  font: inherit; font-size: 12px; line-height: 1;
+  padding: 2px 5px; border-radius: 4px;
+  background: var(--input); border: 1px solid var(--border);
+  border-bottom-width: 2px; color: var(--text); white-space: nowrap;
+}
+/* on the narrowest windows, drop the hints before the credit/summary */
+@media (max-width: 720px) { .status-right .kbd-hints { display: none; } }
+
 /* VSCode-style remote indicator: a green pill flush to the bottom-left corner */
 #statusbar #remote-indicator {
   display: inline-flex; align-items: center; gap: 6px;
