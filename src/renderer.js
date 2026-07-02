@@ -469,6 +469,12 @@ function createPane(opts = {}) {
     fontSize: 14,            // VSCode's default terminal/editor font size
     cursorBlink: true,
     scrollback: 5000,
+    // Wheel feel. xterm's default of 1 line/notch crawls; 5 matches VSCode's
+    // brisker scroll. On the alternate buffer (Claude Code/vim/less) xterm's
+    // alternateScrollMode turns the wheel into arrow keys, so this also makes
+    // scrolling the TUI itself noticeably faster.
+    scrollSensitivity: 5,
+    fastScrollSensitivity: 5,   // multiplier while holding Alt
     allowProposedApi: true,
   });
   const fit = new FitAddon.FitAddon();
@@ -2368,7 +2374,8 @@ function createFrontMirror(paneId) {
     // Match VSCode's default terminal font per platform: Consolas (Windows),
     // Menlo (macOS), Droid Sans Mono (Linux), with a generic fallback.
     fontFamily: 'Consolas, "Courier New", Menlo, Monaco, "Droid Sans Mono", monospace',
-    fontSize: 14, cursorBlink: true, scrollback: 5000, allowProposedApi: true,
+    fontSize: 14, cursorBlink: true, scrollback: 5000,
+    scrollSensitivity: 5, fastScrollSensitivity: 5, allowProposedApi: true,
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
@@ -2450,21 +2457,54 @@ function handleShortcut(e) {
     switchTabByIndex(parseInt(e.key, 10) - 1);
     return true;
   }
-  // PageUp / PageDown / End — page through the focused pane's scrollback so long
-  // output is easy to read. Only on the shell's normal buffer; a fullscreen app
-  // (vim/less/htop, on the alternate buffer) gets these keys itself. End steals
-  // the key only while scrolled up — otherwise it falls through so readline's
-  // "jump to end of line" still works.
+  // PageUp / PageDown / End — scroll the focused pane so long output is easy to
+  // read. Two worlds share these keys:
+  //   • Plain shell (normal buffer): page xterm's own 5000-line scrollback.
+  //   • Full-screen TUI (Claude Code/vim/less/htop, alternate buffer): xterm
+  //     keeps NO scrollback here, so there's nothing local to page. If the app
+  //     is tracking the mouse (Claude Code is), we emulate wheel notches — the
+  //     exact path the real wheel uses — so the keys scroll the app's own view.
+  //     If it isn't (a key-driven pager), we forward the raw keys and let it act.
+  // End on the normal buffer steals the key only while scrolled up; otherwise it
+  // falls through so readline's "jump to end of line" still works.
   if (!e.ctrlKey && !e.altKey && (e.key === 'PageUp' || e.key === 'PageDown' || e.key === 'End')) {
     const p = panes.get(focusedId);
     const t = p && p.term;
-    if (t && t.buffer.active.type === 'normal') {
+    if (t) {
+      const mouseOn = t.modes && t.modes.mouseTrackingMode !== 'none';
+      const onAlt = t.buffer.active.type !== 'normal';
+      if (mouseOn) {
+        // Center the synthetic pointer so it lands on the app's scroll region.
+        const col = Math.max(1, Math.ceil(t.cols / 2));
+        const row = Math.max(1, Math.ceil(t.rows / 2));
+        // Notches per press. Kept modest (¼ the row count) because we don't know
+        // how many lines the app moves per notch — undershooting just means one
+        // more keypress, whereas overshooting flies past what you wanted to read.
+        const page = Math.max(3, Math.floor(t.rows / 4));
+        if (e.key === 'PageUp') { sendWheelNotches(p.id, col, row, 64, page); return true; }
+        if (e.key === 'PageDown') { sendWheelNotches(p.id, col, row, 65, page); return true; }
+        if (e.key === 'End') { sendWheelNotches(p.id, col, row, 65, 200); return true; } // race to the live bottom
+        return true;
+      }
+      if (onAlt) return false;   // key-driven fullscreen app — let it handle the keys
       if (e.key === 'PageUp') { t.scrollPages(-1); return true; }
       if (e.key === 'PageDown') { t.scrollPages(1); return true; }
       if (t.buffer.active.viewportY < t.buffer.active.baseY) { t.scrollToBottom(); return true; }
     }
   }
   return false;
+}
+
+// Emit `count` SGR mouse-wheel presses (button 64 = up, 65 = down) at (col,row)
+// to a pane's PTY. This is the same encoding xterm sends for a real wheel spin,
+// so an app tracking the mouse scrolls its own view. Coordinates are 1-based.
+// Assumes SGR extended mode (1006), which Ink-based TUIs like Claude Code use;
+// if the app isn't in mouse mode we never get here (guarded by mouseTrackingMode).
+function sendWheelNotches(paneId, col, row, btn, count) {
+  const one = `\x1b[<${btn};${col};${row}M`;
+  let seq = '';
+  for (let i = 0; i < count; i++) seq += one;
+  if (seq) window.hydra.input(paneId, seq);
 }
 
 // Pull whatever file/image is on the Windows clipboard (via the main process'
